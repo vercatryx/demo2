@@ -3,11 +3,12 @@
 import { forwardRef } from 'react';
 import type { ClientInvoiceApiPayload } from '@/lib/invoice/build-client-invoice-payload';
 import { formatInvoiceMoney, getClientInvoiceFixedLine } from '@/lib/invoice/build-client-invoice-payload';
-import { APP_LOGO_PATH } from '@/lib/brand';
+import { APP_BRAND_NAME, APP_LOGO_PATH } from '@/lib/brand';
 import {
     INVOICE_ORG_ADDRESS_INLINE,
     INVOICE_ORG_SUPPORT,
     invoiceOrgContactOneLine,
+    invoiceOrgFooterTagline,
 } from '@/lib/invoice/invoice-org-footer';
 import styles from './invoice-receipt.module.css';
 
@@ -19,7 +20,7 @@ type Props = {
 };
 
 export const InvoiceReceipt = forwardRef<HTMLDivElement, Props>(function InvoiceReceipt({ invoice }, ref) {
-    const footerLine = process.env.NEXT_PUBLIC_INVOICE_ORG_FOOTER_LINE || 'Thank you for your business.';
+    const footerLine = invoiceOrgFooterTagline();
     const padCount = Math.max(0, MIN_TABLE_BODY_ROWS - 1);
     const accountRef = invoice.clientId.slice(0, 8).toUpperCase();
     const fixedLine =
@@ -34,7 +35,7 @@ export const InvoiceReceipt = forwardRef<HTMLDivElement, Props>(function Invoice
                         <div className={styles.headerTop}>
                             <div className={styles.brand}>
                                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img src="/diet-fantasy-logo.png" alt="" className={styles.logo} />
+                                <img src={APP_LOGO_PATH} alt={APP_BRAND_NAME} className={styles.logo} />
                             </div>
                             <div className={styles.headerTitles}>
                                 <h1 className={styles.docTitle}>Invoice</h1>

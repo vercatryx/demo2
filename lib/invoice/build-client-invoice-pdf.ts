@@ -6,9 +6,10 @@
 import { existsSync, readFileSync } from 'fs';
 import path from 'path';
 import { jsPDF } from 'jspdf';
+import { APP_LOGO_FILENAME } from '@/lib/brand';
 import type { ClientInvoiceApiPayload } from '@/lib/invoice/build-client-invoice-payload';
 import { formatInvoiceMoney } from '@/lib/invoice/build-client-invoice-payload';
-import { invoiceOrgContactOneLine } from '@/lib/invoice/invoice-org-footer';
+import { invoiceOrgContactOneLine, invoiceOrgFooterTagline } from '@/lib/invoice/invoice-org-footer';
 
 /** Core palette (RGB) */
 const C = {
@@ -97,7 +98,7 @@ export function buildClientInvoicePdfBytes(payload: ClientInvoiceApiPayload): Ui
 
     const HEADER_BAND = 28;
     const FOOTER_BAND = 28;
-    const footerLine = process.env.NEXT_PUBLIC_INVOICE_ORG_FOOTER_LINE || 'Thank you for your business.';
+    const footerLine = invoiceOrgFooterTagline();
 
     // --- Page wash (barely visible) ---
     setFill(doc, C.pageBg);
@@ -109,7 +110,7 @@ export function buildClientInvoicePdfBytes(payload: ClientInvoiceApiPayload): Ui
     doc.line(0, HEADER_BAND, pageW, HEADER_BAND);
 
     // --- Logo ---
-    const logoPath = path.join(process.cwd(), 'public', 'app-logo.png');
+    const logoPath = path.join(process.cwd(), 'public', APP_LOGO_FILENAME);
     const logoW = 54;
     const logoH = 18.5;
     const logoY = 9;

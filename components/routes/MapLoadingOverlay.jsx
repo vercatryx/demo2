@@ -2,6 +2,7 @@
 "use client";
 
 import React from "react";
+import { APP_BRAND_NAME, APP_LOGO_PATH } from "@/lib/brand";
 
 /**
  * Map loading overlay
@@ -9,7 +10,7 @@ import React from "react";
  * - Subtle animated sweep across logo for polish
  * - Transparent background (just faint gray map dimming)
  */
-export default function MapLoadingOverlay({ show, logoSrc = "/diet-fantasy-logo.png" }) {
+export default function MapLoadingOverlay({ show, logoSrc = APP_LOGO_PATH }) {
     if (!show) return null;
 
     return (
@@ -45,14 +46,14 @@ export default function MapLoadingOverlay({ show, logoSrc = "/diet-fantasy-logo.
                         borderRadius: "50%",
                         border: "6px solid rgba(0,0,0,0.1)",
                         borderTopColor: "rgba(0,0,0,0.45)",
-                        animation: "df-ring-spin 1.2s linear infinite",
+                        animation: "map-ring-spin 1.2s linear infinite",
                     }}
                 />
 
                 {/* Logo */}
                 <img
                     src={logoSrc}
-                    alt="Diet Fantasy"
+                    alt={APP_BRAND_NAME}
                     style={{
                         width: "80%",
                         height: "auto",
@@ -71,7 +72,7 @@ export default function MapLoadingOverlay({ show, logoSrc = "/diet-fantasy-logo.
                         background:
                             "linear-gradient(to bottom, rgba(255,255,255,0.0) 0%, rgba(255,255,255,0.25) 60%, rgba(255,255,255,0.0) 100%)",
                         backgroundSize: "100% 200%",
-                        animation: "df-sweep 1.1s ease-in-out infinite",
+                        animation: "map-sweep 1.1s ease-in-out infinite",
                         mixBlendMode: "overlay",
                         pointerEvents: "none",
                     }}
@@ -80,11 +81,11 @@ export default function MapLoadingOverlay({ show, logoSrc = "/diet-fantasy-logo.
 
             {/* Animations */}
             <style>{`
-        @keyframes df-ring-spin {
+        @keyframes map-ring-spin {
           from { transform: rotate(0deg); }
           to   { transform: rotate(360deg); }
         }
-        @keyframes df-sweep {
+        @keyframes map-sweep {
           0%   { background-position: 0% -100%; opacity: .35; }
           50%  { background-position: 0% 0%; opacity: .55; }
           100% { background-position: 0% -100%; opacity: .35; }

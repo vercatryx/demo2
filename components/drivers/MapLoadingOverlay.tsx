@@ -1,7 +1,15 @@
 // components/drivers/MapLoadingOverlay.tsx
 "use client";
 
-export default function MapLoadingOverlay({ show, logoSrc }: { show?: boolean; logoSrc?: string }) {
+import { APP_BRAND_NAME, APP_LOGO_PATH } from "@/lib/brand";
+
+export default function MapLoadingOverlay({
+    show,
+    logoSrc = APP_LOGO_PATH,
+}: {
+    show?: boolean;
+    logoSrc?: string;
+}) {
     if (!show) return null;
     return (
         <div
@@ -17,13 +25,13 @@ export default function MapLoadingOverlay({ show, logoSrc }: { show?: boolean; l
             }}
         >
             <div style={{ textAlign: "center" }}>
-                {logoSrc && (
+                {logoSrc ? (
                     <img
                         src={logoSrc}
-                        alt="Loading"
+                        alt={APP_BRAND_NAME}
                         style={{ width: 48, height: 48, marginBottom: 12 }}
                     />
-                )}
+                ) : null}
                 <div
                     style={{
                         width: 32,

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { verifyOtp } from '@/lib/auth-actions';
 import Image from 'next/image';
+import { APP_BRAND_NAME, APP_LOGO_PATH } from '@/lib/brand';
 import styles from '../page.module.css';
 
 export default function VerifyLoginPage() {
@@ -71,8 +72,8 @@ export default function VerifyLoginPage() {
                 <div className="text-center">
                     <div className={styles.logoContainer}>
                         <Image
-                            src="/diet-fantasy-logo.png"
-                            alt="Diet Fantasy Logo"
+                            src={APP_LOGO_PATH}
+                            alt={`${APP_BRAND_NAME} logo`}
                             width={200}
                             height={200}
                             className={styles.logo}

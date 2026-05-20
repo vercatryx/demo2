@@ -10,6 +10,7 @@ import { PDFDocument, rgb, StandardFonts, PDFFont } from "pdf-lib";
 import { supabase } from "@/lib/supabase";
 import * as fs from "fs";
 import * as path from "path";
+import { APP_LOGO_FILENAME } from "@/lib/brand";
 
 const BILL_DATE_DEFAULT = "2026-02-16";
 
@@ -27,7 +28,7 @@ function addDays(iso: string, days: number): string {
 
 async function fetchLogoBytes(): Promise<Uint8Array | null> {
     try {
-        const publicPath = path.join(process.cwd(), "public", "diet-fantasy-logo.png");
+        const publicPath = path.join(process.cwd(), "public", APP_LOGO_FILENAME);
         if (fs.existsSync(publicPath)) {
             const buf = fs.readFileSync(publicPath);
             return new Uint8Array(buf);

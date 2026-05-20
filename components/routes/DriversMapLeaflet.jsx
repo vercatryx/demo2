@@ -15,6 +15,7 @@ import {
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import MapLoadingOverlay from "./MapLoadingOverlay";
+import { APP_LOGO_PATH } from "@/lib/brand";
 
 /* ==================== Config / constants ==================== */
 
@@ -2474,7 +2475,7 @@ export default function DriversMapLeaflet({
                 </MapContainer>
 
                 {/* Loading overlay (separate component) */}
-                <MapLoadingOverlay show={showOverlay} logoSrc={logoSrc || "/diet-fantasy-logo.png"} />
+                <MapLoadingOverlay show={showOverlay} logoSrc={logoSrc || APP_LOGO_PATH} />
             </div>
         </div>
     );

@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
+import { APP_LOGO_PATH } from "@/lib/brand";
 
 type Pt = { x: number; y: number; t: number };
 type Stroke = Pt[];
@@ -93,7 +94,7 @@ function todayString() {
 
 async function fetchLogoBytes(): Promise<Uint8Array | null> {
     try {
-        const r = await fetch("/diet-fantasy-logo.png", { cache: "reload" });
+        const r = await fetch(APP_LOGO_PATH, { cache: "reload" });
         if (!r.ok) return null;
         const buf = await r.arrayBuffer();
         return new Uint8Array(buf);
