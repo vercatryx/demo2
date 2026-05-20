@@ -1,0 +1,36 @@
+/* Billing list – portable styles */
+
+.container { width: 100%; }
+.header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--spacing-xl, 2rem); }
+.title { font-size: 1.75rem; font-weight: 700; }
+.viewToggle { display: flex; background-color: var(--bg-surface, #f5f5f5); border: 1px solid var(--border-color, #ddd); border-radius: var(--radius-md, 8px); padding: 2px; }
+.viewBtn { background: none; border: none; padding: 6px 12px; border-radius: var(--radius-sm, 4px); color: var(--text-secondary, #555); font-size: 0.875rem; cursor: pointer; font-weight: 500; }
+.viewBtn:hover { color: var(--text-primary, #111); }
+.viewBtnActive { background-color: var(--color-primary, #3b82f6); color: #fff; font-weight: 600; }
+.headerActions { display: flex; gap: 1rem; align-items: center; }
+.filters { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--spacing-lg, 1.5rem); background: var(--bg-surface, #f5f5f5); padding: var(--spacing-md, 1rem); border: 1px solid var(--border-color, #ddd); border-radius: var(--radius-md, 8px); }
+.searchBox { position: relative; display: flex; align-items: center; }
+.searchIcon { position: absolute; left: 12px; color: var(--text-tertiary, #888); }
+.list { background: var(--bg-surface, #fff); border: 1px solid var(--border-color, #ddd); border-radius: var(--radius-lg, 8px); overflow-x: auto; }
+.listHeader { display: flex; padding: var(--spacing-md, 1rem) var(--spacing-lg, 1.5rem); background: var(--bg-surface-hover, #f0f0f0); border-bottom: 1px solid var(--border-color, #ddd); font-weight: 600; color: var(--text-secondary, #555); font-size: 0.875rem; min-width: 1000px; }
+.requestRow { display: flex; align-items: center; padding: var(--spacing-md, 1rem) var(--spacing-lg, 1.5rem); border-bottom: 1px solid var(--border-color, #ddd); cursor: pointer; min-width: 1000px; background: var(--bg-surface, #fff); }
+.requestRow:hover { background: var(--bg-surface-hover, #f5f5f5); }
+.ordersDetail { background: var(--bg-surface-hover, #f5f5f5); border-bottom: 1px solid var(--border-color, #ddd); padding: var(--spacing-lg, 1.5rem); }
+.ordersDetailHeader { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--spacing-md, 1rem); padding-bottom: var(--spacing-sm, 0.5rem); border-bottom: 1px solid var(--border-color, #ddd); }
+.ordersDetailHeader h3 { font-size: 1rem; font-weight: 600; margin: 0; color: var(--text-primary, #111); }
+.ordersCount { font-size: 0.875rem; color: var(--text-secondary, #555); }
+.ordersList { background: var(--bg-surface, #fff); border: 1px solid var(--border-color, #ddd); border-radius: var(--radius-md, 8px); overflow: hidden; }
+.ordersListHeader { display: flex; padding: var(--spacing-sm, 0.5rem) var(--spacing-md, 1rem); background: var(--bg-surface-hover, #f0f0f0); border-bottom: 1px solid var(--border-color, #ddd); font-weight: 600; color: var(--text-secondary, #555); font-size: 0.8rem; min-width: 800px; }
+.orderRow { display: flex; align-items: center; padding: var(--spacing-sm, 0.5rem) var(--spacing-md, 1rem); border-bottom: 1px solid var(--border-color, #ddd); min-width: 1000px; }
+.orderRow:last-child { border-bottom: none; }
+.orderRow:hover { background: var(--bg-surface-hover, #f5f5f5); }
+.proofLink { display: flex; align-items: center; gap: 6px; color: var(--color-primary, #2563eb); text-decoration: none; font-size: 0.875rem; }
+.proofLink:hover { text-decoration: underline; }
+.statusSuccess { color: var(--color-success, #16a34a); font-weight: 600; }
+.statusFailed { color: var(--color-danger, #dc2626); font-weight: 600; }
+.statusPending { color: var(--color-warning, #d97706); font-weight: 600; }
+.statusReady { color: var(--color-primary, #2563eb); font-weight: 600; }
+.statusNeutral { color: var(--text-secondary, #555); font-weight: 500; }
+.empty { padding: var(--spacing-xl, 2rem); text-align: center; color: var(--text-tertiary, #888); }
+.loadingContainer { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 100px 0; color: var(--text-secondary, #555); }
+.statusDropdown { position: absolute; top: 100%; left: 0; right: 0; background: var(--bg-surface, #fff); border: 1px solid var(--border-color, #ddd); border-radius: var(--radius-md, 8px); padding: var(--spacing-md, 1rem); margin-top: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); z-index: 100; min-width: 200px; }

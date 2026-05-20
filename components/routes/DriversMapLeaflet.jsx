@@ -1,0 +1,2483 @@
+// components/DriversMapLeaflet.jsx
+"use client";
+
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import {
+    MapContainer,
+    TileLayer,
+    Marker,
+    ZoomControl,
+    useMap,
+    CircleMarker,
+    Polyline,
+    Pane,
+} from "react-leaflet";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+import MapLoadingOverlay from "./MapLoadingOverlay";
+
+/* ==================== Config / constants ==================== */
+
+// Selection colors
+const SELECTION_PIN_COLOR = "#48be85";
+const SELECTION_RING_COLOR = "rgba(235,247,7,0.55)"; // halo/glow
+
+// Icon geometry
+const PIN_W = 28;
+const PIN_H = 42;
+const ANCHOR_X = 14; // tip X
+const ANCHOR_Y = 42; // tip Y
+
+// Selection hit tolerance (pixels)
+const HIT_RADIUS_PX = 16;
+
+/* ==================== Utils ==================== */
+const sid = (v) => {
+    try {
+        return v == null ? "" : String(v);
+    } catch {
+        return "";
+    }
+};
+
+// robust number coercion: number | string | Prisma.Decimal | object-with-toString()
+const toNum = (v) => {
+    if (v == null) return null;
+    if (typeof v === "number") return Number.isFinite(v) ? v : null;
+    if (typeof v === "string") {
+        const n = parseFloat(v);
+        return Number.isFinite(n) ? n : null;
+    }
+    if (typeof v === "object") {
+        if (typeof v.toNumber === "function") {
+            const n = v.toNumber();
+            return Number.isFinite(n) ? n : null;
+        }
+        if (typeof v.valueOf === "function") {
+            const vv = v.valueOf();
+            if (typeof vv === "number" && Number.isFinite(vv)) return vv;
+            if (typeof vv === "string") {
+                const n = parseFloat(vv);
+                return Number.isFinite(n) ? n : null;
+            }
+        }
+        if (typeof v.toString === "function") {
+            const n = parseFloat(v.toString());
+            return Number.isFinite(n) ? n : null;
+        }
+    }
+    return null;
+};
+
+// pull coords from several common shapes (flat & nested)
+const getLL = (s) => {
+    if (!s) return null;
+
+    // flat
+    let lat = toNum(s?.lat ?? s?.latitude);
+    let lng = toNum(s?.lng ?? s?.longitude);
+
+    // nested: user.*, geo.*, location.*, coords.*, position.*
+    if (lat == null || lng == null) {
+        const srcs = [s.user, s.geo, s.location, s.coords, s.position];
+        for (const src of srcs) {
+            if (!src) continue;
+            if (lat == null) lat = toNum(src.lat ?? src.latitude);
+            if (lng == null) lng = toNum(src.lng ?? src.longitude);
+            if (lat != null && lng != null) break;
+        }
+    }
+
+    // defensive: ignore 0/0 and obvious junk
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    if (Math.abs(lat) < 0.00001 && Math.abs(lng) < 0.00001) return null;
+
+    return [lat, lng];
+};
+
+// Very small, stable offset (meters) to separate exact-overlap markers
+function jitterLL(ll, id) {
+    if (!ll) return null;
+    const [lat, lng] = ll;
+    const s = sid(id);
+    // simple FNV-like hash
+    let h = 2166136261 >>> 0;
+    for (let i = 0; i < s.length; i++) {
+        h ^= s.charCodeAt(i);
+        h = Math.imul(h, 16777619) >>> 0;
+    }
+    // -0.5..0.5
+    const r1 = ((h & 1023) / 1023) - 0.5;
+    const r2 = (((h >>> 10) & 1023) / 1023) - 0.5;
+
+    const meters = 6; // small nudge; visually separates stacks
+    const dLat = (meters / 111320) * r1;
+    const dLng =
+        (meters /
+            (40075000 * Math.cos((lat * Math.PI) / 180) / 360)) * r2;
+
+    return [lat + dLat, lng + dLng];
+}
+
+const asLeafletMarker = (maybe) => {
+    if (!maybe) return null;
+    if (typeof maybe.getLatLng === "function") return maybe;
+    if (maybe.leafletElement?.getLatLng) return maybe.leafletElement;
+    if (maybe.marker?.getLatLng) return maybe.marker;
+    return null;
+};
+
+/** Extract numeric order from "Driver X" (Driver 0 should be first) */
+function driverRankByName(name) {
+    const m = /driver\s+(\d+)/i.exec(String(name || ""));
+    return m ? parseInt(m[1], 10) : Number.MAX_SAFE_INTEGER;
+}
+
+/** Helper to read boolean-ish values across shapes */
+function truthyish(v) {
+    if (v === true || v === 1) return true;
+    if (typeof v === "string") {
+        const s = v.trim().toLowerCase();
+        return s === "true" || s === "1" || s === "yes" || s === "y";
+    }
+    return false;
+}
+
+/** Robust paused detector (common variants + strings) */
+function isPausedStop(s) {
+    const flags = [
+        s?.paused,
+        s?.isPaused,
+        s?.pause,
+        s?.onHold,
+        s?.hold,
+        s?.flags?.paused,
+        s?.flags?.hold,
+        s?.user?.paused,
+        s?.user?.isPaused,
+        s?.visit?.paused,
+        (s?.pausedAt ?? s?.holdUntil ?? s?.onHoldUntil ?? null) ? true : false,
+    ];
+    if (flags.some(truthyish)) return true;
+
+    const statusCandidates = [
+        s?.status,
+        s?.state,
+        s?.routeStatus,
+        s?.deliveryStatus,
+        s?.visitStatus,
+        s?.user?.status,
+        s?.flags?.status,
+        s?.note,
+        s?.pausedReason,
+    ].map((x) => (x == null ? "" : String(x).toLowerCase()));
+
+    for (const status of statusCandidates) {
+        if (
+            status.includes("pause") ||
+            status.includes("on hold") ||
+            status.includes("on_hold") ||
+            status === "hold" ||
+            status === "paused" ||
+            status === "skipped" ||
+            status === "skip"
+        ) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/** Get color for stop based on driver color
+ * Always uses the driver's color for assigned stops
+ * NEVER uses order status for marker colors - only driver assignment determines color
+ * IGNORES any stop.color property - only uses driver assignment colors
+ */
+function getStopColor(stop, driverColor) {
+    // Priority 1: Use stop's __driverColor property if set (this is set from assigned driver's color)
+    // This is the most reliable source as it's explicitly set when stops are prepared
+    if (stop?.__driverColor && stop.__driverColor !== "#666" && stop.__driverColor !== "gray" && stop.__driverColor !== "grey") {
+        return stop.__driverColor;
+    }
+    
+    // Priority 2: Use the driver's color if provided (for assigned stops)
+    // This is the fallback when __driverColor is not set
+    if (driverColor && driverColor !== "#666" && driverColor !== "gray" && driverColor !== "grey") {
+        return driverColor;
+    }
+    
+    // Priority 3: Default: use gray for stops without driver assignment
+    // NOTE: Order status is NEVER used for marker colors - only driver assignment matters
+    // NOTE: stop.color property (if it exists) is IGNORED - we only use driver assignment colors
+    return "#666";
+}
+
+/* ==================== Icons (anchor-fixed) ==================== */
+const iconCache = new Map();
+const iconKey = (color, selected) => `${color}|${selected ? "sel" : "norm"}`;
+
+function makePinIcon(color = "#1f77b4", selected = false) {
+    const k = iconKey(color, selected);
+    const cached = iconCache.get(k);
+    if (cached) return cached;
+
+    const fill = selected ? SELECTION_PIN_COLOR : color;
+    const stroke = selected ? "rgba(0,0,0,0.8)" : "rgba(0,0,0,0.4)";
+    const ring = selected
+        ? `<circle cx="${ANCHOR_X}" cy="${ANCHOR_Y - 29}" r="8" fill="none" stroke="${SELECTION_RING_COLOR}" stroke-width="3"></circle>`
+        : "";
+
+    const html = `
+    <div style="position:relative; width:${PIN_W}px; height:${PIN_H}px;">
+      <svg width="${PIN_W}" height="${PIN_H}" viewBox="0 0 ${PIN_W} ${PIN_H}" xmlns="http://www.w3.org/2000/svg" style="display:block">
+        ${ring}
+        <path d="M14 0C6.82 0 1 5.82 1 13c0 9.6 10.3 18.1 12.2 19.67a1 1 0 0 0 1.6 0C16.7 31.1 27 22.6 27 13 27 5.82 21.18 0 14 0z" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>
+        <circle cx="14" cy="13" r="4.5" fill="white"/>
+      </svg>
+      <div style="
+        position:absolute;
+        left:${ANCHOR_X - 8};
+        bottom:0;
+        transform: translate3d(0,4px,0);
+        width:16px; height:6px;
+        border-radius:50%;
+        background:rgba(0,0,0,0.25);
+        opacity:.8;
+      "></div>
+    </div>
+  `;
+
+    const icon = L.divIcon({
+        html,
+        className: "pin-icon",
+        iconSize: [PIN_W, PIN_H],
+        iconAnchor: [ANCHOR_X, ANCHOR_Y],
+        popupAnchor: [0, -36],
+    });
+    iconCache.set(k, icon);
+    return icon;
+}
+
+/* ==================== Data helpers ==================== */
+function findStopByIdLocal(id, drivers, unrouted) {
+    const key = sid(id);
+    // Use the same pattern as ClientDriverAssignment: stop.__driverColor || driver.color
+    for (const d of drivers) {
+        for (const s of d.stops || []) {
+            if (sid(s.id) === key) {
+                // Match ClientDriverAssignment: __driverColor: assignedDriver?.color || null
+                // Priority: stop.__driverColor > driver.color > default
+                const driverColor = s.__driverColor || d.color || "#1f77b4";
+                return { stop: s, color: driverColor, fromDriverId: d.driverId };
+            }
+        }
+    }
+    for (const s of unrouted || [])
+        if (sid(s.id) === key) return { stop: s, color: getStopColor(s, "#666"), fromDriverId: null };
+    return { stop: null, color: "#666", fromDriverId: null };
+}
+
+/* ==================== View persistence ==================== */
+const VIEW_KEY = "driversMap:view";
+function saveView(map) {
+    try {
+        const c = map.getCenter(),
+            z = map.getZoom();
+        sessionStorage.setItem(
+            VIEW_KEY,
+            JSON.stringify({ lat: c.lat, lng: c.lng, zoom: z })
+        );
+    } catch {}
+}
+function loadView() {
+    try {
+        const raw = sessionStorage.getItem(VIEW_KEY);
+        if (!raw) return null;
+        const v = JSON.parse(raw);
+        if (
+            Number.isFinite(v?.lat) &&
+            Number.isFinite(v?.lng) &&
+            Number.isFinite(v?.zoom)
+        )
+            return v;
+    } catch {}
+    return null;
+}
+
+/* ==================== Map bridge (single-fire) ==================== */
+function MapBridge({ onReady }) {
+    const map = useMap();
+    const onReadyRef = useRef(onReady);
+    const calledRef = useRef(false);
+    useEffect(() => {
+        onReadyRef.current = onReady;
+    }, [onReady]);
+    useEffect(() => {
+        if (map && !calledRef.current) {
+            calledRef.current = true;
+            onReadyRef.current?.(map);
+        }
+    }, [map]);
+    return null;
+}
+
+/* ==================== Programmatic popup ==================== */
+/** Format dates for display */
+const formatDate = (dateStr) => {
+    if (!dateStr) return null;
+    try {
+        const date = new Date(dateStr);
+        return date.toLocaleDateString();
+    } catch {
+        return null;
+    }
+};
+
+/** Preview popup showing stop details */
+async function openPreviewPopup({ map, stop, color, drivers, onDriverChange, isOrdersViewTab = false }) {
+    if (!map || !stop) return;
+    console.log("[openPreviewPopup] stop from:", stop.__source ?? "marker-click", "stop:", { id: stop.id, name: stop.name, __driverName: stop.__driverName, __driverId: stop.__driverId, orderNumber: stop.orderNumber, order_number: stop.order_number });
+    const ll = getLL(stop);
+    if (!ll) return;
+
+    // Fetch client name if we have userId and name is missing/Unnamed
+    let clientName = null;
+    const userId = stop.userId || stop.clientId || stop.id;
+    const currentName = stop.name;
+    
+    // If name is missing, "(Unnamed)", or "Unnamed", fetch from API
+    if (userId && (!currentName || currentName === "(Unnamed)" || currentName === "Unnamed" || currentName.trim() === "")) {
+        try {
+            const res = await fetch(`/api/users/${userId}`, { cache: 'no-store' });
+            if (res.ok) {
+                const client = await res.json();
+                // Build name from first/last or use full_name/name
+                if (client.first || client.last) {
+                    clientName = `${client.first || ''} ${client.last || ''}`.trim();
+                } else if (client.full_name) {
+                    clientName = client.full_name;
+                } else if (client.name) {
+                    clientName = client.name;
+                }
+            }
+        } catch (err) {
+            console.error('[StopPreview] Failed to fetch client:', err);
+        }
+    }
+    
+    // Get driver information - check multiple possible field names
+    // Priority: Use assigned_driver_id from stop to fetch driver from drivers table
+    let driverName = stop.__driverName || stop.driverName || null;
+    const driverId = stop.__driverId || stop.assignedDriverId || stop.assigned_driver_id || stop.assignedDriver_id || null;
+    
+    // If we have a driver ID but no name, fetch it directly from drivers table using assigned_driver_id
+    if (!driverName && driverId) {
+        try {
+            const res = await fetch(`/api/drivers/${driverId}`, { cache: 'no-store' });
+            if (res.ok) {
+                const driver = await res.json();
+                if (driver && driver.name) {
+                    driverName = driver.name;
+                }
+            }
+        } catch (err) {
+            console.error('[StopPreview] Failed to fetch driver name from drivers table:', err);
+            // Fallback: try routes API if drivers table lookup fails
+            try {
+                const res = await fetch('/api/route/routes?day=all', { cache: 'no-store' });
+                if (res.ok) {
+                    const data = await res.json();
+                    const routes = data.routes || [];
+                    const route = routes.find((r) => String(r.driverId || r.id) === String(driverId));
+                    if (route) {
+                        driverName = route.driverName || route.name || 'Unknown Driver';
+                    }
+                }
+            } catch (fallbackErr) {
+                console.error('[StopPreview] Failed to fetch driver name from routes API:', fallbackErr);
+            }
+        }
+    }
+
+    const container = document.createElement("div");
+    container.style.minWidth = "280px";
+    container.style.maxWidth = "400px";
+    container.style.border = `3px solid ${color}`;
+    container.style.borderRadius = "10px";
+    container.style.padding = "10px";
+    container.style.boxShadow = "0 6px 24px rgba(0,0,0,0.15)";
+    container.style.backgroundColor = "white";
+    container.style.fontFamily = "system-ui, -apple-system, sans-serif";
+    container.style.fontSize = "13px";
+    
+    const orderStatus = stop.orderStatus || stop.order?.status || stop.status || null;
+    
+    const getStatusColor = (status) => {
+        if (!status) return "#6b7280";
+        const s = status.toLowerCase();
+        if (s === "cancelled") return "#ef4444";
+        if (s === "waiting_for_proof") return "#f59e0b";
+        if (s === "billing_pending") return "#8b5cf6";
+        if (s === "completed") return "#16a34a";
+        return "#3b82f6";
+    };
+    
+    const statusColor = orderStatus ? getStatusColor(orderStatus) : null;
+    const statusDisplay = orderStatus ? orderStatus.replace(/_/g, " ") : null;
+    
+    // Helper to check if a string looks like an address (contains numbers and street indicators)
+    // This should be more lenient - only flag obvious addresses, not business names that might have numbers
+    const looksLikeAddress = (str) => {
+        if (!str) return false;
+        const s = str.toLowerCase().trim();
+        // Check if it exactly matches the stop's address (strongest indicator)
+        const stopAddr = `${stop.address || ""} ${stop.apt || ""}`.toLowerCase().trim();
+        if (s === stopAddr) return true;
+        
+        // Only flag if it's clearly an address pattern (number + street type word)
+        // Be more conservative to avoid false positives with business names
+        return /\d+\s+\w+\s+(street|st|avenue|ave|road|rd|drive|dr|lane|ln|boulevard|blvd|court|ct|way|circle|cir|place|pl|parkway|pkwy)\b/i.test(s);
+    };
+    
+    // Get client's full name - Priority: full_name from client record > constructed name > other fields
+    const getClientFullName = () => {
+        // Priority 1: Use full_name from client record (directly from database)
+        if (stop.full_name && stop.full_name.trim() && !looksLikeAddress(stop.full_name)) {
+            return stop.full_name.trim();
+        }
+        if (stop.fullName && stop.fullName.trim() && !looksLikeAddress(stop.fullName)) {
+            return stop.fullName.trim();
+        }
+        
+        // Check nested objects for full_name
+        if (stop.user?.fullName && stop.user.fullName.trim() && !looksLikeAddress(stop.user.fullName)) {
+            return stop.user.fullName.trim();
+        }
+        if (stop.user?.full_name && stop.user.full_name.trim() && !looksLikeAddress(stop.user.full_name)) {
+            return stop.user.full_name.trim();
+        }
+        if (stop.client?.fullName && stop.client.fullName.trim() && !looksLikeAddress(stop.client.fullName)) {
+            return stop.client.fullName.trim();
+        }
+        if (stop.client?.full_name && stop.client.full_name.trim() && !looksLikeAddress(stop.client.full_name)) {
+            return stop.client.full_name.trim();
+        }
+        
+        // Priority 2: Use stop.name (API sets this to full_name or constructed name)
+        if (stop.name && stop.name.trim() !== "" && stop.name !== "(Unnamed)") {
+            const stopNameLower = stop.name.toLowerCase().trim();
+            const stopAddr = `${stop.address || ""} ${stop.apt || ""}`.trim().toLowerCase();
+            
+            // If name doesn't exactly match address, use it
+            if (stopNameLower !== stopAddr && stopNameLower !== "(unnamed)") {
+                return stop.name.trim();
+            }
+        }
+        
+        // Priority 3: Construct from first/last name directly on stop
+        const getField = (obj, ...keys) => {
+            for (const key of keys) {
+                if (obj[key] !== undefined && obj[key] !== null && obj[key] !== "") {
+                    return String(obj[key]).trim();
+                }
+            }
+            return "";
+        };
+        
+        const first = getField(stop, 'first', 'firstName', 'first_name');
+        const last = getField(stop, 'last', 'lastName', 'last_name');
+        const firstLastCombined = `${first} ${last}`.trim();
+        
+        if (firstLastCombined) {
+            return firstLastCombined;
+        }
+        if (first) {
+            return first;
+        }
+        if (last) {
+            return last;
+        }
+        
+        // Priority 4: Check nested user/client objects for first/last
+        const getFirstLast = (obj) => {
+            if (!obj) return null;
+            const f = obj?.first || obj?.firstName || obj?.first_name || "";
+            const l = obj?.last || obj?.lastName || obj?.last_name || "";
+            const combined = `${f} ${l}`.trim();
+            return (combined && combined !== f && combined !== l) ? combined : null;
+        };
+        
+        const userFirstLast = getFirstLast(stop.user);
+        if (userFirstLast) return userFirstLast;
+        
+        const clientFirstLast = getFirstLast(stop.client);
+        if (clientFirstLast) return clientFirstLast;
+        
+        // Priority 5: Name from nested objects
+        if (stop.user?.name && stop.user.name.trim() && !looksLikeAddress(stop.user.name)) {
+            return stop.user.name.trim();
+        }
+        if (stop.client?.name && stop.client.name.trim() && !looksLikeAddress(stop.client.name)) {
+            return stop.client.name.trim();
+        }
+        
+        // Last resort: return "Unnamed"
+        return "Unnamed";
+    };
+    
+    let clientFullName = getClientFullName();
+    
+    // If we fetched a client name from API, use it (it's more reliable)
+    if (clientName && clientName.trim()) {
+        clientFullName = clientName;
+    }
+    
+    // If still "Unnamed" or empty, try one more time with current stop.name if it exists
+    if ((!clientFullName || clientFullName === "Unnamed" || clientFullName === "(Unnamed)") && stop.name && stop.name.trim() && stop.name !== "(Unnamed)" && stop.name !== "Unnamed") {
+        const stopAddr = `${stop.address || ""} ${stop.apt || ""}`.trim().toLowerCase();
+        if (stop.name.toLowerCase().trim() !== stopAddr) {
+            clientFullName = stop.name;
+        }
+    }
+    
+    // Final fallback
+    if (!clientFullName || clientFullName === "Unnamed" || clientFullName === "(Unnamed)") {
+        clientFullName = "Unnamed";
+    }
+    
+    // Leaflet automatically wraps content in .leaflet-popup-content
+    // The first bold element should be the client's full name
+    let html = `
+        <div style="font-weight:700;font-size:15px;margin-bottom:8px;color:#111827;font-weight:bold;line-height:1.4">
+            ${clientFullName}
+        </div>
+        <div style="color:#6b7280;margin-bottom:2px">${stop.address || ""}${stop.apt ? " " + stop.apt : ""}</div>
+        <div style="color:#6b7280;margin-bottom:4px">${stop.city || ""} ${stop.state || ""} ${stop.zip || ""}</div>
+        ${stop.phone ? `<div style="color:#6b7280;margin-bottom:8px">📞 ${stop.phone}</div>` : ""}
+        
+        ${(stop.orderNumber || isOrdersViewTab) ? `
+        <div style="margin-top:10px;padding:8px;background:#f9fafb;border-radius:6px;font-size:12px;line-height:1.6;border:1px solid #e5e7eb">
+            ${stop.orderNumber ? `
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+                <span style="color:#6b7280"><strong>Order #:</strong></span>
+                <span style="font-weight:500">${stop.orderNumber}</span>
+            </div>
+            ` : ""}
+            ${isOrdersViewTab ? `
+            <div style="display:flex;justify-content:space-between;align-items:center;${stop.orderNumber ? 'margin-top:6px' : ''}">
+                <span style="color:#6b7280"><strong>Order Status:</strong></span>
+                ${orderStatus ? `
+                <span style="padding:2px 8px;border-radius:4px;background-color:${statusColor}20;color:${statusColor};font-weight:500;text-transform:capitalize;font-size:11px">
+                    ${statusDisplay}
+                </span>
+                ` : `
+                <span style="color:#9ca3af;font-size:11px">N/A</span>
+                `}
+            </div>
+            ` : ""}
+        </div>
+        ` : ""}
+    `;
+    
+    // Driver assignment section - show dropdown if drivers and onDriverChange are provided
+    const currentDriverId = stop?.__driverId || stop?.assignedDriverId || stop?.assigned_driver_id || '';
+    const stopId = stop?.id || 'unknown';
+    const selectId = `driver-select-${stopId}`;
+    
+    if (drivers && drivers.length > 0 && onDriverChange) {
+        html += `
+            <div style="margin-top:8px;padding:8px;background:#f0f9ff;border-radius:6px;font-size:12px;border:1px solid #bfdbfe">
+                <div style="margin-bottom:6px;color:#1e40af;font-weight:600">Assign Driver:</div>
+                <select id="${selectId}" style="width:100%;padding:6px 8px;border-radius:4px;border:1px solid #bfdbfe;background:white;font-size:12px;cursor:pointer">
+                    <option value="">None</option>
+                    ${drivers.map(driver => `
+                        <option value="${driver.id}" ${String(driver.id) === String(currentDriverId) ? 'selected' : ''}>${driver.name || 'Unknown Driver'}</option>
+                    `).join('')}
+                </select>
+            </div>
+        `;
+    } else if (driverName) {
+        // Show read-only driver name if no assignment functionality
+        html += `
+            <div style="margin-top:8px;padding:6px;background:#f0f9ff;border-radius:6px;font-size:12px;border:1px solid #bfdbfe">
+                <div style="display:flex;justify-content:space-between">
+                    <span style="color:#1e40af"><strong>Driver:</strong></span>
+                    <span style="font-weight:500;color:#1e40af">${driverName}</span>
+                </div>
+                ${stop.__stopIndex !== undefined ? `
+                <div style="display:flex;justify-content:space-between;margin-top:4px">
+                    <span style="color:#1e40af"><strong>Stop #:</strong></span>
+                    <span style="font-weight:500;color:#1e40af">${stop.__stopIndex + 1}</span>
+                </div>
+                ` : ""}
+            </div>
+        `;
+    }
+    
+    if (stop.dislikes) {
+        html += `
+            <div style="margin-top:8px;padding:6px;background:#fef3c7;border-radius:6px;font-size:11px;border:1px solid #fcd34d">
+                <div style="color:#92400e;font-weight:600;margin-bottom:4px">Notes:</div>
+                <div style="color:#78350f;white-space:pre-wrap;line-height:1.4">${stop.dislikes}</div>
+            </div>
+        `;
+    }
+    
+    container.innerHTML = html;
+    
+    // Attach event listener for driver dropdown if present
+    if (drivers && drivers.length > 0 && onDriverChange) {
+        // Use setTimeout to ensure DOM is ready
+        setTimeout(() => {
+            const selectEl = container.querySelector(`#${selectId}`);
+            if (selectEl) {
+                selectEl.addEventListener('change', async (e) => {
+                    const selectedDriverId = e.target.value;
+                    try {
+                        await onDriverChange(stop, selectedDriverId);
+                        // Close the popup after successful assignment
+                        map.closePopup();
+                    } catch (error) {
+                        console.error('Failed to assign driver:', error);
+                        alert('Failed to assign driver. Please try again.');
+                    }
+                });
+            }
+        }, 0);
+    }
+    
+    const popup = L.popup({ closeOnClick: true, autoClose: true, className: "color-popup", maxWidth: 400 })
+        .setLatLng(ll)
+        .setContent(container);
+    
+    popup.openOn(map);
+}
+
+/** Assign popup with current driver preselected (if any) */
+function openAssignPopup({ map, stop, color, drivers, onAssign }) {
+    if (!map || !stop) return;
+    const ll = getLL(stop);
+    if (!ll) return;
+
+    // Determine currently assigned driverId, if any
+    const stopId = sid(stop.id);
+    let currentDriverId = null;
+    for (const d of drivers || []) {
+        if ((d.stops || []).some((s) => sid(s.id) === stopId)) {
+            currentDriverId = d.driverId;
+            break;
+        }
+    }
+    if (currentDriverId == null && stop.__driverId != null) {
+        currentDriverId = stop.__driverId;
+    }
+
+    const container = document.createElement("div");
+    container.style.minWidth = "240px";
+    container.style.border = `3px solid ${color}`;
+    container.style.borderRadius = "10px";
+    container.style.padding = "6px";
+    container.style.boxShadow = "0 6px 24px rgba(0,0,0,0.15)";
+    
+    const orderDisplay = stop.orderNumber ? `#${stop.orderNumber}` : "N/A";
+    
+    container.innerHTML = `
+    <div style="font-weight:700">${stop.name || "Unnamed"}</div>
+    <div>${stop.address || ""}${stop.apt ? " " + stop.apt : ""}</div>
+    <div>${stop.city || ""} ${stop.state || ""} ${stop.zip || ""}</div>
+    ${stop.phone ? `<div style="margin-top:4px">${stop.phone}</div>` : ""}
+    <div style="margin-top:8px;padding:6px;background:#f3f4f6;border-radius:6px;font-size:11px;line-height:1.4">
+      <div><strong>Order #:</strong> ${orderDisplay}</div>
+    </div>
+    <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
+      <label style="font-size:12px">Assign to:</label>
+      <select id="__assignSel" style="padding:4px 6px;border-radius:6px;border:1px solid #ccc"></select>
+    </div>
+  `;
+    const sel = container.querySelector("#__assignSel");
+
+    const sortedDrivers = [...(drivers || [])].sort(
+        (a, b) => driverRankByName(a.name) - driverRankByName(b.name)
+    );
+
+    const o0 = document.createElement("option");
+    o0.value = "";
+    o0.textContent = "Select driver…";
+    o0.disabled = !!currentDriverId;
+    o0.selected = !currentDriverId;
+    sel.appendChild(o0);
+
+    for (const d of sortedDrivers) {
+        const o = document.createElement("option");
+        o.value = String(d.driverId);
+        o.textContent = d.name;
+        sel.appendChild(o);
+    }
+
+    if (currentDriverId != null) {
+        sel.value = String(currentDriverId);
+    }
+
+    // Create and store popup reference so we can close it after assignment
+    const popup = L.popup({ closeOnClick: true, autoClose: true, className: "color-popup" })
+        .setLatLng(ll)
+        .setContent(container);
+
+    sel.addEventListener("change", async () => {
+        const to = sel.value;
+        if (to && to.trim() !== "") {
+            try {
+                await onAssign?.(stop, to);
+                // Close popup after successful assignment
+                popup.close();
+            } catch (err) {
+                console.error("Assignment failed:", err);
+                alert("Failed to assign driver. Please try again.");
+                // Don't close popup on error so user can try again
+            }
+        }
+    });
+
+    popup.openOn(map);
+}
+
+/* ==================== Pretty checkbox row ==================== */
+function CheckRow({ id, checked, onChange, label, title }) {
+    const selected = !!checked;
+    return (
+        <label
+            htmlFor={id}
+            title={title}
+            style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                fontSize: 13,
+                userSelect: "none",
+                cursor: "pointer",
+                padding: "8px 10px",
+                borderRadius: 10,
+                border: selected ? "1px solid #99c2ff" : "1px solid #e5e7eb",
+                background: selected ? "#eef5ff" : "#fff",
+                color: selected ? "#0b66ff" : "#111827",
+                transition: "background 120ms, color 120ms, border 120ms",
+            }}
+        >
+            <input
+                id={id}
+                type="checkbox"
+                checked={checked}
+                onChange={(e) => onChange?.(e.target.checked)}
+                style={{
+                    width: 18,
+                    height: 18,
+                    transform: "scale(1.25)",
+                    accentColor: "#0b66ff",
+                    cursor: "pointer",
+                }}
+            />
+            <span style={{ lineHeight: 1 }}>{label}</span>
+        </label>
+    );
+}
+
+/* ==================== Component ==================== */
+export default function DriversMapLeaflet({
+                                              drivers = [],
+                                              unrouted = [],
+                                              onReassign, // (stop, driverId)
+                                              onRenameDriver, // optional: (driverId, newNumber) => Promise
+                                              onStopClick, // optional: (stop) => void - called when stop is clicked
+                                              driversForAssignment, // optional: array of {id, name} for driver dropdown
+                                              onDriverChange, // optional: (stop, driverId) => Promise<void> - called when driver is changed in popup
+                                              onBulkAssignComplete, // optional: () => void - called after bulk assign completes
+                                              onExpose, // optional
+                                              initialCenter = [40.7128, -74.006],
+                                              initialZoom = 10,
+                                              showRouteLinesDefault = false,
+                                              busy = false, // external loading flag
+                                              pausedDetector, // optional override for paused detection
+                                              logoSrc, // optional loading logo (path or URL)
+                                              readonly = false, // disable all editing interactions
+                                              isOrdersViewTab = false, // whether we're in the Orders View tab
+                                              dataSourceLabel, // optional: for debug logging where map data came from
+                                              /** Food-eligible clients missing lat/lng: searchable but no pin (Client Assignment). */
+                                              searchSupplement = [],
+                                          }) {
+    const mapRef = useRef(null);
+    const [mapReady, setMapReady] = useState(false);
+    const [didFitOnce, setDidFitOnce] = useState(false);
+
+    // Driver editing state
+    const [editingDriverId, setEditingDriverId] = useState(null);
+    const [editingNumber, setEditingNumber] = useState("");
+
+    const onReassignRef = useRef(onReassign);
+    useEffect(() => {
+        onReassignRef.current = onReassign;
+    }, [onReassign]);
+
+    const [localDrivers, setLocalDrivers] = useState(drivers || []);
+    const [localUnrouted, setLocalUnrouted] = useState(unrouted || []);
+    const localDriversRef = useRef(localDrivers);
+    const localUnroutedRef = useRef(localUnrouted);
+    useEffect(() => {
+        localDriversRef.current = localDrivers;
+    }, [localDrivers]);
+    useEffect(() => {
+        localUnroutedRef.current = localUnrouted;
+    }, [localUnrouted]);
+    useEffect(() => {
+        // Use the same pattern as ClientDriverAssignment: route.color || palette[i % palette.length]
+        // Drivers should already have colors set from the routes page, so just use them as-is
+        const driversArray = Array.isArray(drivers) ? drivers : [];
+        setLocalDrivers(driversArray);
+    }, [drivers]);
+    useEffect(() => {
+        setLocalUnrouted(Array.isArray(unrouted) ? unrouted : []);
+    }, [unrouted]);
+
+    // 🔑 Always-sorted view of drivers so 0 is first
+    const sortedDrivers = useMemo(
+        () =>
+            (localDrivers || [])
+                .slice()
+                .sort((a, b) => driverRankByName(a.name) - driverRankByName(b.name)),
+        [localDrivers]
+    );
+
+    /* ------- toggles / selection / halo ------- */
+    const [showRouteLines, setShowRouteLines] = useState(!!showRouteLinesDefault);
+    const [selectMode, setSelectMode] = useState(false);
+    const [clickPickMode, setClickPickMode] = useState(false);
+    const [selectedIds, setSelectedIds] = useState(() => new Set());
+    const [hoverIds, setHoverIds] = useState(() => new Set());
+    const hoverIdsRef = useRef(new Set());
+    const [bulkDriverId, setBulkDriverId] = useState("");
+    const [bulkBusy, setBulkBusy] = useState(false);
+    const selectedCount = selectedIds.size;
+
+    const [selectedHalo, setSelectedHalo] = useState({
+        lat: null,
+        lng: null,
+        color: "#666",
+    });
+    const clearHalo = useCallback(
+        () => setSelectedHalo({ lat: null, lng: null, color: "#666" }),
+        []
+    );
+
+    /* ===== Driver filter (index click) ===== */
+    // Use string IDs so both numeric and UUID driver IDs work
+    const [driverFilter, setDriverFilter] = useState(() => new Set());
+    const hasFilter = driverFilter.size > 0;
+
+    /* ===== Show only unrouted filter ===== */
+    const [showOnlyUnrouted, setShowOnlyUnrouted] = useState(false);
+    const clearShowOnlyUnrouted = useCallback(() => setShowOnlyUnrouted(false), []);
+
+    const toggleDriverFilter = useCallback((driverId) => {
+        setDriverFilter((prev) => {
+            const next = new Set(prev);
+            const idStr = driverId != null && driverId !== "" ? String(driverId) : null;
+            if (idStr == null) return prev;
+            if (next.has(idStr)) next.delete(idStr);
+            else next.add(idStr);
+            return next;
+        });
+    }, []);
+
+    const clearDriverFilter = useCallback(() => setDriverFilter(new Set()), []);
+
+    // When "Show only unrouted" is on, hide all drivers; otherwise only show selected drivers when filtered
+    const visibleDrivers = useMemo(
+        () =>
+            showOnlyUnrouted
+                ? []
+                : hasFilter
+                    ? sortedDrivers.filter((d) => driverFilter.has(String(d.driverId ?? d.id ?? "")))
+                    : sortedDrivers,
+        [sortedDrivers, driverFilter, hasFilter, showOnlyUnrouted]
+    );
+
+    /* ------- derived ------- */
+    const hasLL = (s) => !!getLL(s);
+
+    const assignedIdSet = useMemo(() => {
+        const set = new Set();
+        for (const d of sortedDrivers) for (const s of d.stops || []) set.add(sid(s.id));
+        return set;
+    }, [sortedDrivers]);
+
+    const unroutedFiltered = useMemo(
+        () => (localUnrouted || []).filter((s) => !assignedIdSet.has(sid(s.id))),
+        [localUnrouted, assignedIdSet]
+    );
+
+    const allPoints = useMemo(() => {
+        const pts = [];
+        if (showOnlyUnrouted) {
+            for (const s of unroutedFiltered) {
+                const ll = getLL(s);
+                if (ll) pts.push(ll);
+            }
+            return pts;
+        }
+        for (const d of visibleDrivers)
+            for (const s of d.stops || []) {
+                const ll = getLL(s);
+                if (ll) pts.push(ll);
+            }
+        // hide unrouted when filtering by driver
+        if (!hasFilter) {
+            for (const s of localUnrouted) {
+                const ll = getLL(s);
+                if (ll) pts.push(ll);
+            }
+        }
+        return pts;
+    }, [visibleDrivers, localUnrouted, hasFilter, showOnlyUnrouted, unroutedFiltered]);
+
+    // Show unrouted when "Show only unrouted" is on, or when not filtering by driver
+    const unroutedFilteredVisible = useMemo(
+        () => (showOnlyUnrouted || !hasFilter ? unroutedFiltered : []),
+        [hasFilter, showOnlyUnrouted, unroutedFiltered]
+    );
+
+    const indexItems = useMemo(
+        () =>
+            sortedDrivers.map((d) => ({
+                driverId: d.driverId,
+                name: d.name,
+                color: d.color,
+                count: (d.stops || []).length,
+            })),
+        [sortedDrivers]
+    );
+    const totalAssigned = useMemo(
+        () =>
+            visibleDrivers.reduce((s, d) => s + (d.stops || []).length, 0),
+        [visibleDrivers]
+    );
+
+    // Header totals
+    const unroutedVisible = useMemo(
+        () => unroutedFilteredVisible.length,
+        [unroutedFilteredVisible]
+    );
+    const totalVisibleStops = totalAssigned + unroutedVisible;
+
+    const pausedVisible = useMemo(() => {
+        const detect = typeof pausedDetector === "function" ? pausedDetector : isPausedStop;
+        let c = 0;
+        for (const d of visibleDrivers) {
+            for (const s of d.stops || []) {
+                if (hasLL(s) && detect(s)) c++;
+            }
+        }
+        for (const s of unroutedFilteredVisible) {
+            if (hasLL(s) && detect(s)) c++;
+        }
+        return c;
+    }, [visibleDrivers, unroutedFilteredVisible, pausedDetector]);
+
+    const idBaseColor = useMemo(() => {
+        const m = new Map();
+        // ALWAYS use driver color - NEVER use order status for marker colors
+        // Use the same pattern as ClientDriverAssignment: stop.__driverColor || driver.color
+        for (const d of sortedDrivers) {
+            for (const s of d.stops || []) {
+                // Match ClientDriverAssignment pattern: __driverColor: assignedDriver?.color || null
+                // Priority: stop.__driverColor > driver.color > default
+                // Order status is NEVER used for marker colors - only driver assignment matters
+                // IGNORE any stop.color property - only use driver assignment colors
+                // Direct access to ensure driver color is used
+                const stopColor = s.__driverColor || d.color || "#1f77b4";
+                m.set(sid(s.id), stopColor);
+            }
+        }
+        for (const s of localUnrouted) m.set(sid(s.id), getStopColor(s, "#666"));
+        return m;
+    }, [sortedDrivers, localUnrouted]);
+
+    /* ------- marker refs ------- */
+    const assignedMarkerRefs = useRef(new Map());
+    const unroutedMarkerRefs = useRef(new Map());
+    useEffect(() => {
+        assignedMarkerRefs.current = new Map();
+        unroutedMarkerRefs.current = new Map();
+    }, [sortedDrivers, unroutedFiltered]);
+
+    /* ------- local data updates ------- */
+    const moveStopsLocally = useCallback((stopIds, toDriverId) => {
+        const toId = String(toDriverId); // Keep as string (UUID) to match database
+        const idKeys = new Set(stopIds.map(sid));
+        const dSnap = localDriversRef.current;
+        const uSnap = localUnroutedRef.current;
+
+        // Find the target driver's name and color from the existing drivers first
+        const targetDriver = dSnap.find((d) => String(d.driverId) === String(toId));
+        const driverName = targetDriver?.name || `Driver ${toId}`;
+        const driverColor = targetDriver?.color || "#1f77b4";
+
+        const movingStops = [];
+        for (const id of idKeys) {
+            const { stop } = findStopByIdLocal(id, dSnap, uSnap);
+            if (stop) {
+                movingStops.push({ 
+                    ...stop, 
+                    __driverId: toId,
+                    __driverName: driverName,
+                    __driverColor: driverColor
+                });
+            }
+        }
+
+        const strippedDrivers = dSnap.map((d) => ({
+            ...d,
+            stops: (d.stops || []).filter((s) => !idKeys.has(sid(s.id))),
+        }));
+        const nextUnrouted = uSnap.filter((s) => !idKeys.has(sid(s.id)));
+
+        let injected = false;
+        const nextDrivers = strippedDrivers.map((d) => {
+            if (String(d.driverId) === String(toId)) {
+                injected = true;
+                const newStops = Array.isArray(d.stops) ? [...d.stops, ...movingStops] : [...movingStops];
+                return { ...d, stops: newStops };
+            }
+            return d;
+        });
+
+        const finalDrivers = injected
+            ? nextDrivers
+            : [
+                ...nextDrivers,
+                {
+                    driverId: toId,
+                    name: driverName,
+                    color: driverColor,
+                    stops: movingStops,
+                    polygon: [],
+                },
+            ];
+
+        setLocalDrivers(finalDrivers);
+        setLocalUnrouted(nextUnrouted);
+        localDriversRef.current = finalDrivers;
+        localUnroutedRef.current = nextUnrouted;
+    }, []);
+    /* ------- popup assign (single) ------- */
+    const onReassignLocal = useCallback(
+        async (stop, toDriverId) => {
+            const id = stop?.id;
+            if (id == null) {
+                console.error("Stop ID is null, cannot reassign");
+                return;
+            }
+            if (!toDriverId) {
+                console.error("Driver ID is missing, cannot reassign");
+                return;
+            }
+            try {
+                await onReassignRef.current?.(stop, toDriverId);
+                moveStopsLocally([id], toDriverId);
+            } catch (err) {
+                console.error("Reassign local failed:", err);
+                throw err; // Re-throw to be caught by onChange handler
+            }
+        },
+        [moveStopsLocally]
+    );
+
+    const openAssignForStop = useCallback(
+        (stop, baseColor) => {
+            const map = mapRef.current;
+            if (!map) return;
+            openAssignPopup({
+                map,
+                stop,
+                color: baseColor || "#1f77b4",
+                drivers: localDriversRef.current,
+                onAssign: onReassignLocal,
+            });
+            const ll = getLL(stop);
+            if (ll) setSelectedHalo({ lat: ll[0], lng: ll[1], color: baseColor || "#1f77b4" });
+        },
+        [onReassignLocal]
+    );
+
+    /* ------- search ------- */
+    const [q, setQ] = useState("");
+    const searchInputRef = useRef(null);
+    const [results, setResults] = useState([]);
+
+    const clearSearch = useCallback(() => {
+        setQ("");
+        requestAnimationFrame(() => searchInputRef.current?.focus());
+    }, []);
+
+    // Collapse runs of whitespace so "32 th" matches "32  thomsen" in DB, and name/address search is forgiving
+    const normalizeSearchHay = useCallback((parts) => {
+        return String(
+            (Array.isArray(parts) ? parts : [parts])
+                .filter((x) => x != null && String(x).trim() !== "")
+                .join(" ")
+        )
+            .toLowerCase()
+            .replace(/\s+/g, " ")
+            .trim();
+    }, []);
+
+    useEffect(() => {
+        const needle = normalizeSearchHay([q]);
+        if (!needle) {
+            setResults([]);
+            return;
+        }
+        const rows = [];
+        for (const d of sortedDrivers)
+            for (const s of d.stops || []) {
+                const hay = normalizeSearchHay([
+                    s.name,
+                    s.fullName,
+                    s.full_name,
+                    s.address,
+                    s.apt,
+                    s.city,
+                    s.state,
+                    s.zip,
+                    s.phone,
+                ]);
+                if (hay.includes(needle)) {
+                    const r = { ...s, __driverId: d.driverId, __driverName: d.name, __unrouted: false, __color: d.color, __source: `driver:${d.name}` };
+                    rows.push(r);
+                }
+            }
+        for (const s of unroutedFiltered) {
+            const hay = normalizeSearchHay([
+                s.name,
+                s.fullName,
+                s.full_name,
+                s.address,
+                s.apt,
+                s.city,
+                s.state,
+                s.zip,
+                s.phone,
+            ]);
+            if (hay.includes(needle)) {
+                const r = { ...s, __driverId: null, __driverName: "Unrouted", __unrouted: true, __color: "#666", __source: "unrouted" };
+                rows.push(r);
+            }
+        }
+        for (const s of Array.isArray(searchSupplement) ? searchSupplement : []) {
+            const hay = normalizeSearchHay([
+                s.name,
+                s.fullName,
+                s.full_name,
+                s.address,
+                s.apt,
+                s.city,
+                s.state,
+                s.zip,
+                s.phone,
+            ]);
+            if (hay.includes(needle)) {
+                rows.push({
+                    ...s,
+                    __noCoords: true,
+                    __unrouted: false,
+                    __source: "no_geocode",
+                    __driverName: "Not on map (no geocode)",
+                });
+            }
+        }
+        setResults(rows.slice(0, 50));
+    }, [q, sortedDrivers, unroutedFiltered, searchSupplement, normalizeSearchHay]);
+
+    const focusResult = useCallback(
+        async (row, { clear = false } = {}) => {
+            if (!row) return;
+            console.log("[focusResult] map data from:", dataSourceLabel ?? "?", "search hit:", row.__source ?? (row.__unrouted ? "unrouted" : `driver:${row.__driverName}`), "row:", { id: row.id, name: row.name, __driverName: row.__driverName, __driverId: row.__driverId, orderNumber: row.orderNumber ?? row.order_number });
+            const map = mapRef.current;
+            const ll = getLL(row);
+            if (!map) return;
+            if (!ll) {
+                if (row.__noCoords) {
+                    window.alert(
+                        "This client has no geolocation, so they do not appear as a pin on the Client Assignment map. Others can still show pins if their address is geocoded. Use Manual Geocoding at the bottom of the Routes page, or open the Map tab to see route stops (which use delivery coordinates)."
+                    );
+                }
+                return;
+            }
+            map.setView(ll, Math.max(map.getZoom(), 14), { animate: true });
+
+            // Open stop preview popup (same as clicking the marker)
+            const stop = { ...row, __driverId: row.__driverId, __driverName: row.__driverName };
+            const color = row.__color || "#1f77b4";
+            await openPreviewPopup({ map, stop, color, drivers: driversForAssignment, onDriverChange, isOrdersViewTab });
+
+            if (clear) clearSearch();
+        },
+        [clearSearch, driversForAssignment, onDriverChange, isOrdersViewTab, dataSourceLabel]
+    );
+
+    /* ------- selection helpers ------- */
+    const toggleId = useCallback((id, forceOn = null) => {
+        setSelectedIds((prev) => {
+            const next = new Set(prev);
+            if (forceOn === true) next.add(id);
+            else if (forceOn === false) next.delete(id);
+            else {
+                next.has(id) ? next.delete(id) : next.add(id);
+            }
+            return next;
+        });
+    }, []);
+
+    const handleMarkerClick = useCallback(
+        async (id, stop, baseColor, e) => {
+            if (readonly) return; // Disable all interactions in readonly mode
+            
+            const map = mapRef.current;
+            const ev = e?.originalEvent;
+            const modifier = ev?.altKey || ev?.metaKey || ev?.ctrlKey;
+            const isToggle = clickPickMode || modifier;
+
+            if (isToggle) {
+                toggleId(id);
+                map?.closePopup();
+                ev?.preventDefault?.();
+                ev?.stopPropagation?.();
+                return;
+            }
+            
+            // If onStopClick callback is provided, call it instead of showing Leaflet popup
+            if (onStopClick && stop) {
+                onStopClick(stop);
+                return;
+            }
+            
+            // Show preview popup when clicking a stop (async to fetch client name if needed)
+            if (stop && map) {
+                await openPreviewPopup({ map, stop, color: baseColor, drivers: driversForAssignment, onDriverChange, isOrdersViewTab });
+            }
+            
+            // Disable assign driver feature for stops - driver assignment is now done directly to clients
+            // map?.closePopup();
+            // openAssignForStop(stop, baseColor);
+        },
+        [clickPickMode, toggleId, readonly, onStopClick, driversForAssignment, onDriverChange, isOrdersViewTab]
+    );
+
+    /* ------- driver editing ------- */
+    const startEditDriver = useCallback((driverId, currentName) => {
+        if (readonly) return; // Disable editing in readonly mode
+        
+        // Don't allow editing Driver 0
+        const isDriver0 = /driver\s+0/i.test(currentName || "");
+        if (isDriver0) return;
+
+        // Extract current number
+        const match = /driver\s+(\d+)/i.exec(currentName || "");
+        const currentNum = match ? match[1] : "";
+
+        setEditingDriverId(driverId);
+        setEditingNumber(currentNum);
+    }, [readonly]);
+
+    const cancelEditDriver = useCallback(() => {
+        setEditingDriverId(null);
+        setEditingNumber("");
+    }, []);
+
+    const saveEditDriver = useCallback(async () => {
+        if (!editingDriverId || !editingNumber.trim()) {
+            cancelEditDriver();
+            return;
+        }
+
+        const newNum = parseInt(editingNumber.trim(), 10);
+
+        // Validate
+        if (!Number.isInteger(newNum) || newNum < 1 || newNum > 99) {
+            alert("Driver number must be between 1 and 99");
+            return;
+        }
+
+        // Check for duplicates
+        const duplicate = sortedDrivers.find(d => {
+            const match = /driver\s+(\d+)/i.exec(d.name || "");
+            const num = match ? parseInt(match[1], 10) : -1;
+            return num === newNum && d.driverId !== editingDriverId;
+        });
+
+        if (duplicate) {
+            alert(`Driver ${newNum} already exists`);
+            return;
+        }
+
+        // Call the rename callback if provided
+        if (onRenameDriver) {
+            try {
+                await onRenameDriver(editingDriverId, newNum);
+                cancelEditDriver();
+            } catch (e) {
+                console.error("Rename failed:", e);
+                alert("Failed to rename driver: " + (e.message || "Unknown error"));
+            }
+        } else {
+            cancelEditDriver();
+        }
+    }, [editingDriverId, editingNumber, sortedDrivers, onRenameDriver, cancelEditDriver]);
+
+    /* ------- Map ready / view ------- */
+    const handleMapReady = useCallback(
+        (m) => {
+            mapRef.current = m;
+            const saved = loadView();
+            if (saved) m.setView([saved.lat, saved.lng], saved.zoom, { animate: false });
+            else m.setView(initialCenter, initialZoom, { animate: false });
+
+            const onMoveEnd = () => saveView(m);
+            m.on("moveend", onMoveEnd);
+            m.on("zoomend", onMoveEnd);
+
+            m.on("click", clearHalo);
+            m.on("popupclose", clearHalo);
+
+            setMapReady(true);
+        },
+        [initialCenter, initialZoom, clearHalo]
+    );
+
+    useEffect(() => {
+        if (!mapReady || didFitOnce) return;
+        const saved = loadView();
+        if (saved) {
+            setDidFitOnce(true);
+            return;
+        }
+        if (!allPoints.length) return;
+        try {
+            const b = L.latLngBounds(allPoints);
+            mapRef.current.fitBounds(b, { padding: [50, 50] });
+            setDidFitOnce(true);
+        } catch {}
+    }, [mapReady, didFitOnce, allPoints]);
+
+    /* ======== Box select (accurate; container pixel space) ======== */
+    useEffect(() => {
+        const map = mapRef.current;
+        if (!map) return;
+        const container = map.getContainer();
+        if (!container) return;
+
+        let startClient = null;
+        let overlay = null;
+        let locked = false;
+
+        const lockMap = () => {
+            if (locked) return;
+            map.dragging.disable();
+            map.touchZoom.disable();
+            map.doubleClickZoom.disable();
+            map.scrollWheelZoom.disable();
+            map.boxZoom.disable();
+            map.keyboard.disable();
+            locked = true;
+        };
+        const unlockMap = () => {
+            if (!locked) return;
+            map.dragging.enable();
+            map.touchZoom.enable();
+            map.doubleClickZoom.enable();
+            map.scrollWheelZoom.enable();
+            map.boxZoom.enable();
+            map.keyboard.enable();
+            locked = false;
+        };
+
+        const toContainerXY = (clientX, clientY) => {
+            const r = container.getBoundingClientRect();
+            return { x: clientX - r.left, y: clientY - r.top };
+        };
+
+        const normalizeRect = (a, b) => ({
+            x1: Math.min(a.x, b.x),
+            y1: Math.min(a.y, b.y),
+            x2: Math.max(a.x, b.x),
+            y2: Math.max(a.y, b.y),
+        });
+
+        const pointInRect = (p, r, pad = 0) =>
+            p.x >= r.x1 - pad &&
+            p.x <= r.x2 + pad &&
+            p.y >= r.y1 - pad &&
+            p.y <= r.y2 + pad;
+
+        function onMouseDown(e) {
+            if (!selectMode || !e.shiftKey || e.button !== 0) return;
+            if (e.target.closest(".leaflet-control")) return;
+
+            startClient = { x: e.clientX, y: e.clientY };
+
+            const cRect = container.getBoundingClientRect();
+            overlay = document.createElement("div");
+            overlay.style.position = "absolute";
+            overlay.style.left = `${startClient.x - cRect.left}px`;
+            overlay.style.top = `${startClient.y - cRect.top}px`;
+            overlay.style.width = "0px";
+            overlay.style.height = "0px";
+            overlay.style.border = "1.5px dashed rgba(0,120,255,0.9)";
+            overlay.style.background = "rgba(0,120,255,0.12)";
+            overlay.style.pointerEvents = "none";
+            overlay.style.zIndex = 999;
+            container.appendChild(overlay);
+
+            lockMap();
+            clearHalo();
+            map.closePopup();
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        function onMouseMove(e) {
+            if (!startClient || !overlay) return;
+
+            const cRect = container.getBoundingClientRect();
+            const nowClient = { x: e.clientX, y: e.clientY };
+            const rrClient = {
+                x1: Math.min(startClient.x, nowClient.x),
+                y1: Math.min(startClient.y, nowClient.y),
+                x2: Math.max(startClient.x, nowClient.x),
+                y2: Math.max(startClient.y, nowClient.y),
+            };
+            overlay.style.left = `${rrClient.x1 - cRect.left}px`;
+            overlay.style.top = `${rrClient.y1 - cRect.top}px`;
+            overlay.style.width = `${rrClient.x2 - rrClient.x1}px`;
+            overlay.style.height = `${rrClient.y2 - rrClient.y1}px`;
+
+            const a = toContainerXY(startClient.x, startClient.y);
+            const b = toContainerXY(nowClient.x, nowClient.y);
+            const rect = normalizeRect(a, b);
+
+            const pad = HIT_RADIUS_PX;
+            const picked = new Set();
+
+            const visit = (refMap) => {
+                refMap.forEach((m, id) => {
+                    const ll = m?.getLatLng?.();
+                    if (!ll) return;
+                    const pt = map.latLngToContainerPoint(ll);
+                    if (pointInRect(pt, rect, pad)) picked.add(id);
+                });
+            };
+
+            visit(assignedMarkerRefs.current);
+            visit(unroutedMarkerRefs.current);
+
+            let changed = false;
+            if (picked.size !== hoverIdsRef.current.size) changed = true;
+            else {
+                for (const id of picked) {
+                    if (!hoverIdsRef.current.has(id)) {
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+            if (changed) {
+                hoverIdsRef.current = picked;
+                setHoverIds(picked);
+            }
+
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        function onMouseUp(e) {
+            if (!startClient) return;
+
+            setHoverIds((prevHover) => {
+                setSelectedIds((prev) => {
+                    const next = new Set(prev);
+                    const subtract = e.altKey || e.metaKey || e.ctrlKey;
+                    prevHover.forEach((id) => (subtract ? next.delete(id) : next.add(id)));
+                    return next;
+                });
+                return new Set();
+            });
+            hoverIdsRef.current = new Set();
+
+            if (overlay?.parentNode) overlay.parentNode.removeChild(overlay);
+            overlay = null;
+            startClient = null;
+            unlockMap();
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        container.addEventListener("mousedown", onMouseDown, true);
+        window.addEventListener("mousemove", onMouseMove, true);
+        window.addEventListener("mouseup", onMouseUp, true);
+        return () => {
+            container.removeEventListener("mousedown", onMouseDown, true);
+            window.removeEventListener("mousemove", onMouseMove, true);
+            window.removeEventListener("mouseup", onMouseUp, true);
+            unlockMap();
+        };
+    }, [selectMode, clearHalo]);
+
+    /* ======== Live coloring ======== */
+    const prevLiveSetRef = useRef(new Set());
+    const setIconForId = useCallback(
+        (id, on) => {
+            const m =
+                assignedMarkerRefs.current.get(id) ||
+                unroutedMarkerRefs.current.get(id);
+            if (!m) return;
+            // Get the stop to check for __driverColor
+            const { stop } = findStopByIdLocal(
+                id,
+                localDriversRef.current,
+                localUnroutedRef.current
+            );
+            // ALWAYS use driver color - NEVER use order status for marker colors
+            // Use the same pattern as ClientDriverAssignment: stop.__driverColor || driver.color
+            // Get from idBaseColor map (which uses the same logic)
+            const stopColor = idBaseColor.get(id) || "#666";
+            m.setIcon(makePinIcon(stopColor, !!on));
+        },
+        [idBaseColor]
+    );
+
+    useEffect(() => {
+        const live = new Set([...selectedIds, ...hoverIds]);
+        const prev = prevLiveSetRef.current;
+        live.forEach((id) => {
+            if (!prev.has(id)) setIconForId(id, true);
+        });
+        prev.forEach((id) => {
+            if (!live.has(id)) setIconForId(id, false);
+        });
+        prevLiveSetRef.current = live;
+    }, [selectedIds, hoverIds, setIconForId]);
+
+    /* ======== TRUE SEQUENTIAL BULK ASSIGN ======== */
+    const applyBulkAssign = useCallback(
+        async (toDriverId) => {
+            if (readonly) return; // Disable bulk assign in readonly mode
+            
+            const to = String(toDriverId); // Keep as string (UUID) to match API expectations
+            const ids = Array.from(selectedIds);
+            if (!to || to.trim() === "" || ids.length === 0 || bulkBusy) return;
+
+            setBulkBusy(true);
+            let successCount = 0;
+            try {
+                for (const id of ids) {
+                    const { stop } = findStopByIdLocal(
+                        id,
+                        localDriversRef.current,
+                        localUnroutedRef.current
+                    );
+                    if (!stop) continue;
+                    await onReassignRef.current?.(stop, to); // persist (server)
+                    moveStopsLocally([id], to); // update local UI
+                    successCount++;
+                }
+                // Call callback after all assignments complete successfully
+                if (successCount > 0 && onBulkAssignComplete) {
+                    onBulkAssignComplete();
+                }
+            } catch (err) {
+                console.error("[BulkAssign(sequential)] failed:", err);
+                alert("Failed to assign stops: " + (err.message || "Unknown error"));
+            } finally {
+                prevLiveSetRef.current.forEach((id) => setIconForId(id, false));
+                prevLiveSetRef.current = new Set();
+                setSelectedIds(new Set());
+                setHoverIds(new Set());
+                hoverIdsRef.current = new Set();
+                setBulkDriverId("");
+                clearHalo();
+                setBulkBusy(false);
+            }
+        },
+        [selectedIds, bulkBusy, moveStopsLocally, clearHalo, setIconForId, readonly, onBulkAssignComplete]
+    );
+
+    const clearSelection = useCallback(() => {
+        prevLiveSetRef.current.forEach((id) => setIconForId(id, false));
+        prevLiveSetRef.current = new Set();
+        setSelectedIds(new Set());
+        setHoverIds(new Set());
+        hoverIdsRef.current = new Set();
+        setBulkDriverId("");
+        clearHalo();
+    }, [setIconForId, clearHalo]);
+
+    /* ======== BULK DELETE GEOCODING ======== */
+    const deleteGeocodingForSelected = useCallback(async () => {
+        const ids = Array.from(selectedIds);
+        if (ids.length === 0 || bulkBusy) return;
+
+        // Confirmation dialog
+        const confirmed = window.confirm(
+            `Delete geocoding (lat/lng) for ${ids.length} selected user${ids.length > 1 ? 's' : ''}?\n\n` +
+            `This will remove their map location and they will need to be geocoded again.`
+        );
+        if (!confirmed) return;
+
+        setBulkBusy(true);
+        let successCount = 0;
+        let failCount = 0;
+
+        try {
+            for (const id of ids) {
+                const { stop } = findStopByIdLocal(
+                    id,
+                    localDriversRef.current,
+                    localUnroutedRef.current
+                );
+                if (!stop) continue;
+
+                // Get the actual userId (could be stop.userId or stop.id)
+                const userId = stop.userId || stop.id;
+                if (!userId) continue;
+
+                try {
+                    // Use the clearGeocode flag to explicitly delete coordinates
+                    const res = await fetch(`/api/users/${userId}`, {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            clearGeocode: true,
+                            cascadeStops: true
+                        }),
+                    });
+                    if (!res.ok) {
+                        throw new Error(await res.text().catch(() => `HTTP ${res.status}`));
+                    }
+                    successCount++;
+                } catch (err) {
+                    console.error(`Failed to delete geocoding for user ${userId}:`, err);
+                    failCount++;
+                }
+            }
+
+            // Show result
+            if (failCount > 0) {
+                alert(`Geocoding deleted for ${successCount} user${successCount !== 1 ? 's' : ''}.\n${failCount} failed.\n\nPage will reload to refresh the view.`);
+            } else {
+                alert(`Geocoding deleted for ${successCount} user${successCount !== 1 ? 's' : ''}.\n\nPage will reload to refresh the view.`);
+            }
+
+            // Clear selection
+            clearSelection();
+
+            // Reload the page to refresh all data (users list, missing geocodes, etc.)
+            if (successCount > 0) {
+                window.location.reload();
+            }
+        } catch (err) {
+            console.error("[BulkDeleteGeocoding] failed:", err);
+            alert("Failed to delete geocoding: " + (err.message || "Unknown error"));
+        } finally {
+            setBulkBusy(false);
+        }
+    }, [selectedIds, bulkBusy, clearSelection]);
+
+    /* ======== Expose API (optional) ======== */
+    useEffect(() => {
+        if (!onExpose) return;
+        const api = {
+            getMap: () => mapRef.current,
+            flyTo: (lat, lng, zoom = 15) =>
+                mapRef.current?.flyTo([lat, lng], zoom, { animate: true }),
+            applyBulkAssign,
+            clearSelection,
+            getSelectedCount: () => selectedIds.size,
+        };
+        onExpose(api);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    /* ------- Render ------- */
+    const showOverlay = !!busy || !!(bulkBusy);
+
+    // NEW: one-click select all unrouted (that are visible/geocoded)
+    const selectAllUnrouted = useCallback(() => {
+        const ids = unroutedFiltered.filter(hasLL).map((s) => sid(s.id));
+        setSelectedIds(new Set(ids));
+        clearHalo();
+        mapRef.current?.closePopup();
+    }, [unroutedFiltered, clearHalo]);
+
+    // SAFE visibility log
+    useEffect(() => {
+        const has = (x) => !!getLL(x);
+
+        const assignedWithLL = sortedDrivers.reduce(
+            (sum, d) => sum + (d.stops || []).filter(has).length,
+            0
+        );
+        const assignedTotal = sortedDrivers.reduce(
+            (s, d) => s + (d.stops || []).length,
+            0
+        );
+
+        const unroutedAll = (localUnrouted || []).filter(
+            (s) => !assignedIdSet.has(sid(s.id))
+        );
+        const unroutedWithLL = unroutedAll.filter(has).length;
+        const unroutedTotal = unroutedAll.length;
+
+        console.log(
+            `[DriversMap] assigned: ${assignedWithLL}/${assignedTotal} | unrouted: ${unroutedWithLL}/${unroutedTotal}`
+        );
+    }, [sortedDrivers, localUnrouted, assignedIdSet]);
+
+    return (
+        <div style={{ height: "100%", width: "100%", position: "relative" }}>
+            {/* Left: Search overlay */}
+            <div
+                style={{
+                    position: "absolute",
+                    zIndex: 1000,
+                    left: 10,
+                    top: 10,
+                    width: 360,
+                    pointerEvents: "auto",
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
+            >
+                <div
+                    style={{
+                        background: "rgba(255,255,255,0.97)",
+                        border: "1px solid #ddd",
+                        borderRadius: 12,
+                        padding: 10,
+                        boxShadow: "0 2px 10px rgba(0,0,0,0.12)",
+                    }}
+                >
+                    <div style={{ position: "relative" }}>
+                        <input
+                            ref={searchInputRef}
+                            value={q}
+                            onChange={(e) => setQ(e.target.value)}
+                            placeholder="Search name, address, phone… (Enter selects first)"
+                            onKeyDown={(e) => {
+                                if (e.key === "Enter" && results.length) {
+                                    focusResult(results[0], { clear: true });
+                                }
+                            }}
+                            style={{
+                                width: "100%",
+                                height: 36,
+                                borderRadius: 8,
+                                border: "1px solid #ccc",
+                                padding: "0 34px 0 10px",
+                                outline: "none",
+                            }}
+                        />
+                        {q.trim() && (
+                            <button
+                                type="button"
+                                aria-label="Clear search"
+                                onClick={clearSearch}
+                                style={{
+                                    position: "absolute",
+                                    right: 6,
+                                    top: "50%",
+                                    transform: "translateY(-50%)",
+                                    width: 24,
+                                    height: 24,
+                                    borderRadius: 12,
+                                    border: "1px solid #ddd",
+                                    background: "#f8f8f8",
+                                    cursor: "pointer",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    fontSize: 14,
+                                    lineHeight: 1,
+                                    userSelect: "none",
+                                }}
+                                title="Clear"
+                            >
+                                ×
+                            </button>
+                        )}
+                    </div>
+
+                    {q.trim() && (
+                        <div
+                            style={{
+                                marginTop: 8,
+                                borderTop: "1px solid #eee",
+                                maxHeight: 260,
+                                overflowY: "auto",
+                                borderRadius: 8,
+                            }}
+                        >
+                            {results.length === 0 ? (
+                                <div style={{ padding: "8px 6px", fontSize: 12, opacity: 0.7 }}>
+                                    No matches
+                                </div>
+                            ) : (
+                                results.map((r) => {
+                                    const id = sid(r.id);
+                                    const ll = getLL(r);
+                                    const sub =
+                                        `${r.address || ""}${r.apt ? " " + r.apt : ""}`.trim() ||
+                                        [r.city, r.state, r.zip].filter(Boolean).join(" ");
+                                    return (
+                                        <button
+                                            key={id}
+                                            type="button"
+                                            onClick={() => {
+                                                focusResult(r, { clear: true });
+                                            }}
+                                            style={{
+                                                width: "100%",
+                                                textAlign: "left",
+                                                padding: "8px 10px",
+                                                background: "#fff",
+                                                border: "1px solid #eee",
+                                                borderRadius: 8,
+                                                marginBottom: 6,
+                                                cursor: ll ? "pointer" : "not-allowed",
+                                                opacity: ll ? 1 : 0.6,
+                                            }}
+                                            title={
+                                                r.__driverId ? `Driver: ${r.__driverName}` : "Unrouted"
+                                            }
+                                        >
+                                            <div
+                                                style={{
+                                                    display: "flex",
+                                                    alignItems: "center",
+                                                    gap: 8,
+                                                }}
+                                            >
+                                                <span
+                                                    style={{
+                                                        width: 12,
+                                                        height: 12,
+                                                        borderRadius: 3,
+                                                        background: r.__color || "#999",
+                                                        border: "1px solid rgba(0,0,0,0.2)",
+                                                    }}
+                                                />
+                                                <div style={{ flex: 1, minWidth: 0 }}>
+                                                    <div
+                                                        style={{
+                                                            fontSize: 13,
+                                                            fontWeight: 700,
+                                                            whiteSpace: "nowrap",
+                                                            overflow: "hidden",
+                                                            textOverflow: "ellipsis",
+                                                        }}
+                                                    >
+                                                        {r.name || "(Unnamed)"}
+                                                    </div>
+                                                    <div
+                                                        style={{
+                                                            fontSize: 12,
+                                                            opacity: 0.8,
+                                                            whiteSpace: "nowrap",
+                                                            overflow: "hidden",
+                                                            textOverflow: "ellipsis",
+                                                        }}
+                                                    >
+                                                        {sub}
+                                                    </div>
+                                                </div>
+                                                {r.__driverId != null && (
+                                                    <div style={{ fontSize: 11, opacity: 0.8 }}>
+                                                        {r.__driverName}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </button>
+                                    );
+                                })
+                            )}
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* Right: Tools + legend + bulk assign */}
+            <div
+                style={{
+                    position: "absolute",
+                    zIndex: 1000,
+                    top: 12,
+                    right: 12,
+                    width: 320,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 10,
+                    pointerEvents: "auto",
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
+            >
+                {(selectedCount > 0 || hoverIds.size > 0) && (
+                    <div
+                        style={{
+                            background: "rgba(255,255,255,0.98)",
+                            border: "1px solid #cde",
+                            borderRadius: 12,
+                            padding: 10,
+                            boxShadow: "0 6px 18px rgba(0,0,0,0.18)",
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 8,
+                            outline: "2px solid rgba(0,120,255,0.15)",
+                        }}
+                    >
+                        <div style={{ fontWeight: 700, fontSize: 13 }}>
+                            {selectedCount} selected
+                            {hoverIds.size ? ` (+${hoverIds.size} preview)` : ""}
+                        </div>
+                        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                            <label style={{ fontSize: 12 }}>Assign to:</label>
+                            <select
+                                value={bulkDriverId}
+                                onChange={(e) => setBulkDriverId(e.target.value)}
+                                disabled={bulkBusy || readonly}
+                                style={{
+                                    padding: "6px 8px",
+                                    borderRadius: 8,
+                                    border: "1px solid #ccc",
+                                    flex: "1 1 auto",
+                                    opacity: bulkBusy ? 0.7 : 1,
+                                }}
+                            >
+                                <option value="">Choose driver…</option>
+                                {sortedDrivers.map((opt, idx) => (
+                                    <option key={opt.driverId != null && !isNaN(opt.driverId) ? opt.driverId : `driver-opt-${idx}`} value={opt.driverId}>
+                                        {opt.name}
+                                    </option>
+                                ))}
+                            </select>
+                            <button
+                                onClick={() => applyBulkAssign(bulkDriverId)}
+                                disabled={!bulkDriverId || bulkBusy || selectedCount === 0 || readonly}
+                                style={{
+                                    padding: "8px 10px",
+                                    borderRadius: 10,
+                                    border: "1px solid #2a7",
+                                    background:
+                                        !bulkDriverId || bulkBusy || selectedCount === 0
+                                            ? "#f6f6f6"
+                                            : "#eaffea",
+                                    cursor:
+                                        !bulkDriverId || bulkBusy || selectedCount === 0
+                                            ? "not-allowed"
+                                            : "pointer",
+                                    fontWeight: 600,
+                                    whiteSpace: "nowrap",
+                                }}
+                                title={bulkBusy ? "Assigning…" : `Assign ${selectedCount}`}
+                            >
+                                {bulkBusy ? "Assigning…" : `Assign ${selectedCount}`}
+                            </button>
+                        </div>
+                        <div style={{ display: "flex", gap: 8 }}>
+                            <button
+                                onClick={clearSelection}
+                                disabled={bulkBusy}
+                                style={{
+                                    flex: 1,
+                                    padding: "8px 10px",
+                                    borderRadius: 10,
+                                    border: "1px solid #ddd",
+                                    background: "#fff",
+                                    cursor: bulkBusy ? "not-allowed" : "pointer",
+                                    fontWeight: 600,
+                                    opacity: bulkBusy ? 0.7 : 1,
+                                }}
+                            >
+                                Clear
+                            </button>
+                        </div>
+                        <div style={{ display: "flex", gap: 8 }}>
+                            <button
+                                onClick={deleteGeocodingForSelected}
+                                disabled={bulkBusy || selectedCount === 0 || readonly}
+                                style={{
+                                    flex: 1,
+                                    padding: "8px 10px",
+                                    borderRadius: 10,
+                                    border: "1px solid #d32f2f",
+                                    background: bulkBusy || selectedCount === 0 ? "#f6f6f6" : "#ffebee",
+                                    color: bulkBusy || selectedCount === 0 ? "#999" : "#c62828",
+                                    cursor: bulkBusy || selectedCount === 0 ? "not-allowed" : "pointer",
+                                    fontWeight: 600,
+                                    opacity: bulkBusy ? 0.7 : 1,
+                                }}
+                                title="Remove lat/lng coordinates for selected users"
+                            >
+                                Delete Geocoding
+                            </button>
+                        </div>
+                        <div style={{ fontSize: 11, opacity: 0.8, lineHeight: 1.3 }}>
+                            Box: hold <b>Shift</b> and drag (add). Hold{" "}
+                            <b>Alt/Option/Ctrl/Cmd</b> when releasing to subtract.
+                            <br />
+                            Click: enable <b>Click to select</b>, or hold{" "}
+                            <b>Alt/Option/Ctrl/Cmd</b> while clicking a dot.
+                        </div>
+                    </div>
+                )}
+
+                <div
+                    style={{
+                        background: "rgba(255,255,255,0.97)",
+                        border: "1px solid #ddd",
+                        borderRadius: 12,
+                        padding: 10,
+                        boxShadow: "0 2px 10px rgba(0,0,0,0.12)",
+                        overflow: "auto",
+                        maxHeight: "55vh",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 8,
+                    }}
+                >
+                    <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                        Stops: {totalVisibleStops} &nbsp;
+                    </div>
+
+                    <CheckRow
+                        id="toggle-routes"
+                        checked={showRouteLines}
+                        onChange={(checked) => setShowRouteLines(!!checked)}
+                        label="Show route lines"
+                        title="Draw a line connecting stops in order for each driver"
+                    />
+                    <CheckRow
+                        id="toggle-area"
+                        checked={selectMode}
+                        onChange={readonly ? () => {} : setSelectMode}
+                        label="Area select (Shift+drag)"
+                        title={readonly ? "Readonly mode - selection disabled" : "Shift-drag to select, Alt/Option/Ctrl/Cmd to subtract"}
+                    />
+                    <CheckRow
+                        id="toggle-click"
+                        checked={clickPickMode}
+                        onChange={readonly ? () => {} : setClickPickMode}
+                        label="Click to select (one-by-one)"
+                        title={readonly ? "Readonly mode - selection disabled" : "When ON, clicking a dot toggles selection (no popup)"}
+                    />
+
+                    {/* Filter status row */}
+                    {(hasFilter || showOnlyUnrouted) && (
+                        <div
+                            style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 8,
+                                fontSize: 12,
+                                background: "#f6fbff",
+                                border: "1px solid #cfe8ff",
+                                borderRadius: 8,
+                                padding: "6px 8px",
+                            }}
+                        >
+                            <div style={{ fontWeight: 700 }}>
+                                {showOnlyUnrouted ? "Showing only unrouted" : `Filtering ${driverFilter.size} driver${driverFilter.size > 1 ? "s" : ""}`}
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    clearDriverFilter();
+                                    clearShowOnlyUnrouted();
+                                }}
+                                style={{
+                                    marginLeft: "auto",
+                                    padding: "4px 8px",
+                                    borderRadius: 8,
+                                    border: "1px solid #cde",
+                                    background: "#fff",
+                                    cursor: "pointer",
+                                    fontSize: 12,
+                                    fontWeight: 600,
+                                }}
+                                title="Show all drivers"
+                            >
+                                Clear filter
+                            </button>
+                        </div>
+                    )}
+
+                    {/* Unrouted summary + "Select all unrouted" */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <div style={{ fontSize: 12, opacity: 0.8 }}>
+                            Unrouted (visible): {unroutedVisible}
+                        </div>
+                        {unroutedVisible > 0 && !hasFilter && (
+                            <button
+                                type="button"
+                                onClick={selectAllUnrouted}
+                                title="Select all geocoded unrouted stops so you can bulk-assign them"
+                                style={{
+                                    marginLeft: "auto",
+                                    padding: "6px 8px",
+                                    borderRadius: 8,
+                                    border: "1px solid #cde",
+                                    background: "#f7fbff",
+                                    cursor: "pointer",
+                                    fontSize: 12,
+                                    fontWeight: 600,
+                                }}
+                            >
+                                Select all unrouted
+                            </button>
+                        )}
+                    </div>
+
+                    {/* Clickable driver index: Unrouted row first (same style as drivers), then drivers */}
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {/* Unrouted row - same look and behavior as driver rows */}
+                        {unroutedVisible > 0 && (
+                            <div
+                                style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 8,
+                                    fontSize: 13,
+                                    width: "100%",
+                                    textAlign: "left",
+                                    padding: "8px 10px",
+                                    borderRadius: 10,
+                                    border: showOnlyUnrouted ? "1px solid #7db3ff" : "1px solid #ddd",
+                                    background: showOnlyUnrouted ? "#eef5ff" : "#fff",
+                                }}
+                            >
+                                <span
+                                    style={{
+                                        width: 16,
+                                        height: 16,
+                                        borderRadius: 4,
+                                        background: "#666",
+                                        border: "1px solid rgba(0,0,0,0.15)",
+                                        flexShrink: 0,
+                                    }}
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => setShowOnlyUnrouted((prev) => !prev)}
+                                    title={showOnlyUnrouted ? "Show all drivers" : "Show only unrouted"}
+                                    style={{
+                                        flex: 1,
+                                        background: "transparent",
+                                        border: "none",
+                                        textAlign: "left",
+                                        cursor: "pointer",
+                                        whiteSpace: "nowrap",
+                                        overflow: "hidden",
+                                        textOverflow: "ellipsis",
+                                        fontWeight: showOnlyUnrouted ? 700 : 500,
+                                        padding: 0,
+                                    }}
+                                >
+                                    Unrouted
+                                </button>
+                                <div
+                                    style={{
+                                        fontVariantNumeric: "tabular-nums",
+                                        opacity: 0.85,
+                                        paddingLeft: 6,
+                                    }}
+                                >
+                                    {unroutedVisible}
+                                </div>
+                            </div>
+                        )}
+                        {indexItems.map((it, idx) => {
+                            const driverIdStr = it.driverId != null && it.driverId !== "" ? String(it.driverId) : null;
+                            const active = driverIdStr != null && driverFilter.has(driverIdStr);
+                            const isEditing = editingDriverId === it.driverId;
+                            const isDriver0 = /driver\s+0/i.test(it.name || "");
+                            const rowKey = driverIdStr != null ? `driver-${driverIdStr}` : `driver-idx-${idx}`;
+
+                            return (
+                                <div
+                                    key={rowKey}
+                                    style={{
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: 8,
+                                        fontSize: 13,
+                                        width: "100%",
+                                        textAlign: "left",
+                                        padding: "8px 10px",
+                                        borderRadius: 10,
+                                        border: active ? "1px solid #7db3ff" : "1px solid #ddd",
+                                        background: active ? "#eef5ff" : "#fff",
+                                    }}
+                                >
+                                    <span
+                                        style={{
+                                            width: 16,
+                                            height: 16,
+                                            borderRadius: 4,
+                                            background: it.color,
+                                            border: "1px solid rgba(0,0,0,0.15)",
+                                            flexShrink: 0,
+                                        }}
+                                    />
+
+                                    {isEditing ? (
+                                        <>
+                                            <span style={{ fontSize: 12 }}>Driver</span>
+                                            <input
+                                                type="number"
+                                                value={editingNumber}
+                                                onChange={(e) => setEditingNumber(e.target.value)}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === "Enter") saveEditDriver();
+                                                    if (e.key === "Escape") cancelEditDriver();
+                                                }}
+                                                autoFocus
+                                                style={{
+                                                    width: 50,
+                                                    padding: "2px 6px",
+                                                    fontSize: 13,
+                                                    border: "1px solid #ccc",
+                                                    borderRadius: 4,
+                                                }}
+                                            />
+                                            <button
+                                                onClick={saveEditDriver}
+                                                style={{
+                                                    padding: "2px 8px",
+                                                    fontSize: 12,
+                                                    border: "1px solid #2a7",
+                                                    borderRadius: 4,
+                                                    background: "#eaffea",
+                                                    cursor: "pointer",
+                                                }}
+                                            >
+                                                ✓
+                                            </button>
+                                            <button
+                                                onClick={cancelEditDriver}
+                                                style={{
+                                                    padding: "2px 8px",
+                                                    fontSize: 12,
+                                                    border: "1px solid #ccc",
+                                                    borderRadius: 4,
+                                                    background: "#f6f6f6",
+                                                    cursor: "pointer",
+                                                }}
+                                            >
+                                                ✕
+                                            </button>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <button
+                                                type="button"
+                                                onClick={() => toggleDriverFilter(it.driverId)}
+                                                title={active ? "Remove from filter" : "Show only this driver"}
+                                                style={{
+                                                    flex: 1,
+                                                    background: "transparent",
+                                                    border: "none",
+                                                    textAlign: "left",
+                                                    cursor: "pointer",
+                                                    whiteSpace: "nowrap",
+                                                    overflow: "hidden",
+                                                    textOverflow: "ellipsis",
+                                                    fontWeight: active ? 700 : 500,
+                                                    padding: 0,
+                                                }}
+                                            >
+                                                {it.name}
+                                            </button>
+                                            <div
+                                                style={{
+                                                    fontVariantNumeric: "tabular-nums",
+                                                    opacity: 0.85,
+                                                    paddingLeft: 6,
+                                                }}
+                                            >
+                                                {it.count}
+                                            </div>
+                                            {!isDriver0 && onRenameDriver && !readonly && (
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        startEditDriver(it.driverId, it.name);
+                                                    }}
+                                                    title="Edit driver number"
+                                                    style={{
+                                                        padding: "2px 6px",
+                                                        fontSize: 11,
+                                                        border: "1px solid #ddd",
+                                                        borderRadius: 4,
+                                                        background: "#fff",
+                                                        cursor: "pointer",
+                                                        opacity: 0.7,
+                                                    }}
+                                                >
+                                                    ✎
+                                                </button>
+                                            )}
+                                        </>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            </div>
+
+            {/* MAP */}
+            <div
+                style={{
+                    height: "100%",
+                    width: "100%",
+                    borderRadius: 12,
+                    overflow: "hidden",
+                    position: "relative",
+                }}
+            >
+                <MapContainer
+                    key="drivers-map-stable"
+                    center={initialCenter}
+                    zoom={initialZoom}
+                    style={{
+                        height: "100%",
+                        width: "100%",
+                        filter: showOverlay ? "grayscale(30%) brightness(0.9)" : "none",
+                    }}
+                    scrollWheelZoom
+                    zoomControl={false}
+                >
+                    <MapBridge onReady={handleMapReady} />
+
+                    <TileLayer
+                        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                        attribution="&copy; OpenStreetMap contributors"
+                    />
+                    <ZoomControl position="bottomleft" />
+
+                    {/* High-z pane to keep pins above everything */}
+                    <Pane name="pins" style={{ zIndex: 650 }} />
+
+                    {/* halo */}
+                    {Number.isFinite(selectedHalo.lat) && Number.isFinite(selectedHalo.lng) && (
+                        <CircleMarker
+                            center={[selectedHalo.lat, selectedHalo.lng]}
+                            pathOptions={{
+                                color: selectedHalo.color,
+                                fillColor: selectedHalo.color,
+                                fillOpacity: 0.18,
+                            }}
+                            radius={18}
+                            weight={3}
+                            interactive={false}
+                            pane="pins"
+                        />
+                    )}
+
+                    {/* route lines - key by stop order so they redraw when route is reorganized */}
+                    {showRouteLines &&
+                        visibleDrivers.map((d, index) => {
+                            const pts = (d.stops || []).map(getLL).filter(Boolean);
+                            if (pts.length < 2) return null;
+                            const driverId = Number.isFinite(d.driverId) ? String(d.driverId) : `unknown-${index}`;
+                            const stopOrderKey = (d.stops || []).map((s) => sid(s.id)).join("-");
+                            return (
+                                <Polyline
+                                    key={`route-${driverId}-${stopOrderKey}`}
+                                    positions={pts}
+                                    pathOptions={{
+                                        color: d.color || "#1f77b4",
+                                        weight: 4,
+                                        opacity: 0.8,
+                                    }}
+                                />
+                            );
+                        })}
+
+                    {/* UNROUTED markers */}
+                    {unroutedFilteredVisible.map((s) => {
+                        const ll = getLL(s);
+                        if (!ll) return null;
+                        const id = sid(s.id);
+                        const pos = jitterLL(ll, id);
+                        const stopColor = getStopColor(s, "#666");
+                        return (
+                            <Marker
+                                key={`u-${id}`}
+                                position={pos}
+                                pane="pins"
+                                zIndexOffset={2000}
+                                icon={makePinIcon(stopColor, selectedIds.has(id) || hoverIds.has(id))}
+                                ref={(ref) => {
+                                    const m = asLeafletMarker(ref);
+                                    if (m) unroutedMarkerRefs.current.set(id, m);
+                                }}
+                                eventHandlers={{
+                                    click: (e) => handleMarkerClick(id, s, stopColor, e),
+                                }}
+                            />
+                        );
+                    })}
+
+                    {/* ASSIGNED markers */}
+                    {/* ALWAYS use driver color - NEVER use order status for marker colors */}
+                    {visibleDrivers.map((d, di) =>
+                        (d.stops || []).map((s) => {
+                            const ll = getLL(s);
+                            if (!ll) return null;
+                            const id = sid(s.id);
+                            const pos = jitterLL(ll, id);
+                            // ALWAYS use driver color: stop.__driverColor (from assignedDriver?.color) > driver.color
+                            // Order status is NEVER used for marker colors - only driver assignment determines color
+                            // IGNORE any stop.color property - only use driver assignment colors
+                            // Ensure we use the driver's color - prioritize stop.__driverColor, then driver.color
+                            const stopColor = s.__driverColor || d.color || "#1f77b4";
+                            const z = 2100 + di; // slightly above unrouted, and stable order
+                            return (
+                                <Marker
+                                    key={`d-${sid(d.driverId)}-s-${id}`}
+                                    position={pos}
+                                    pane="pins"
+                                    zIndexOffset={z}
+                                    icon={makePinIcon(stopColor, selectedIds.has(id) || hoverIds.has(id))}
+                                    ref={(ref) => {
+                                        const m = asLeafletMarker(ref);
+                                        if (m) assignedMarkerRefs.current.set(id, m);
+                                    }}
+                                    eventHandlers={{
+                                        click: (e) => handleMarkerClick(id, s, stopColor, e),
+                                    }}
+                                />
+                            );
+                        })
+                    )}
+                </MapContainer>
+
+                {/* Loading overlay (separate component) */}
+                <MapLoadingOverlay show={showOverlay} logoSrc={logoSrc || "/diet-fantasy-logo.png"} />
+            </div>
+        </div>
+    );
+}
+
+export const runtime = "nodejs";

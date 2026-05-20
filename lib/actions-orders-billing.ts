@@ -1,0 +1,915 @@
+'use server';
+
+/**
+ * Orders & Billing – server actions (migrated from portable module).
+ * Uses this app's Supabase client. DB: orders, order_items, order_vendor_selections,
+ * order_box_selections, billing_records, clients, vendors, menu_items, box_types,
+ * equipment, item_categories, breakfast_items (meal items).
+ */
+
+import { revalidatePath } from 'next/cache';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import type { BillingRequest, ClientProfileMinimal, OrderDetail } from './types-orders-billing';
+
+export type { BillingRequest } from './types-orders-billing';
+import { getWeekStart, getWeekEnd, getWeekRangeString, isDateInWeek } from './utils-week';
+import { toDateStringInAppTz } from './timezone';
+
+import { supabase } from '@/lib/supabase';
+import { getSupabaseDbApiKey } from '@/lib/supabase-env';
+import { verifySession } from '@/lib/session';
+import { primaryProofUrl, hasAnyProofUrl, orderRowProofUrls } from '@/lib/proof-of-delivery-urls';
+
+async function fetchBrooklynClientIds(db: SupabaseClient): Promise<string[]> {
+    const { data, error } = await db.from('clients').select('id').eq('unite_account', 'Brooklyn');
+    if (error) {
+        console.error('[fetchBrooklynClientIds]', error);
+        return [];
+    }
+    return (data || []).map((r: { id: string }) => r.id);
+}
+
+// ---------------------------------------------------------------------------
+// REFERENCE DATA HELPERS (used by getOrderById and getBillingHistory)
+// ---------------------------------------------------------------------------
+
+async function getMenuItems(supabaseClient: SupabaseClient) {
+    const { data } = await supabaseClient.from('menu_items').select('*');
+    return data || [];
+}
+
+async function getVendors(supabaseClient: SupabaseClient) {
+    const { data } = await supabaseClient.from('vendors').select('*');
+    return data || [];
+}
+
+async function getBoxTypes(supabaseClient: SupabaseClient) {
+    const { data } = await supabaseClient.from('box_types').select('*');
+    return data || [];
+}
+
+async function getEquipment(supabaseClient: SupabaseClient) {
+    const { data } = await supabaseClient.from('equipment').select('*');
+    return data || [];
+}
+
+async function getCategories(supabaseClient: SupabaseClient) {
+    const { data } = await supabaseClient.from('item_categories').select('*');
+    return data || [];
+}
+
+/** This app uses breakfast_items for meal/breakfast items (order_items.meal_item_id). */
+async function getMealItems(supabaseClient: SupabaseClient) {
+    const { data } = await supabaseClient.from('breakfast_items').select('*');
+    return (data || []).map((row: any) => ({
+        id: row.id,
+        name: row.name,
+        price_each: row.price_each,
+        quota_value: row.quota_value,
+        category_id: row.category_id,
+    }));
+}
+
+// ---------------------------------------------------------------------------
+// ORDERS LIST
+// ---------------------------------------------------------------------------
+
+/** Shared helper: enrich a page of orders with client name and delivery address. */
+async function enrichOrdersPage(
+    db: SupabaseClient,
+    orders: any[],
+): Promise<any[]> {
+    if (orders.length === 0) return [];
+
+    const clientIds = [...new Set(orders.map((o: any) => o.client_id).filter(Boolean))];
+
+    const clientsMap = new Map<string, string>();
+    const clientAddressesMap = new Map<string, string>();
+    if (clientIds.length > 0) {
+        // Batch client fetches to avoid URL length limits (PostgREST .in() in URL can hit 414 with many IDs)
+        const CLIENT_BATCH = 150;
+        for (let i = 0; i < clientIds.length; i += CLIENT_BATCH) {
+            const batch = clientIds.slice(i, i + CLIENT_BATCH);
+            const { data: clients } = await db.from('clients').select('id, full_name, address').in('id', batch);
+            if (clients)
+                clients.forEach((c: any) => {
+                    clientsMap.set(String(c.id), c.full_name || 'Unknown');
+                    const addr = c.address != null ? String(c.address).trim() : '';
+                    clientAddressesMap.set(String(c.id), addr);
+                });
+        }
+    }
+
+    return orders.map((o: any) => ({
+        ...o,
+        clientName: clientsMap.get(String(o.client_id)) || 'Unknown',
+        clientAddress: clientAddressesMap.get(String(o.client_id)) ?? '',
+        status: o.status || 'pending',
+        scheduled_delivery_date: o.scheduled_delivery_date || null,
+    }));
+}
+
+export type GetOrdersBillingFilters = {
+    search?: string;
+    statusFilter?: string;
+    creationIdFilter?: string;
+};
+
+/**
+ * Paginated orders list. Fetches one page of orders and total count; client/vendor lookups only for that page.
+ * When filters are provided, uses DB-level search (RPC get_orders_billing_search if available).
+ * Returns { orders, total } for the Orders list UI.
+ */
+export async function getOrdersPaginatedBilling(
+    page: number,
+    pageSize: number,
+    filters?: GetOrdersBillingFilters,
+): Promise<{ orders: any[]; total: number }> {
+    const session = await verifySession();
+    const serviceRoleKey = getSupabaseDbApiKey();
+    const db = serviceRoleKey
+        ? createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, serviceRoleKey, { auth: { persistSession: false } })
+        : supabase;
+
+    let brooklynClientIds: string[] | null = null;
+    if (session?.role === 'brooklyn_admin') {
+        brooklynClientIds = await fetchBrooklynClientIds(db);
+        if (brooklynClientIds.length === 0) {
+            return { orders: [], total: 0 };
+        }
+    }
+
+    const hasFilters =
+        (filters?.search != null && filters.search.trim() !== '') ||
+        (filters?.statusFilter != null && filters.statusFilter !== 'all') ||
+        (filters?.creationIdFilter != null && filters.creationIdFilter.trim() !== '');
+
+    if (hasFilters && brooklynClientIds) {
+        return getOrdersWithSearchFallback(db, page, pageSize, filters, brooklynClientIds);
+    }
+
+    if (hasFilters) {
+        const rpcResult = await db.rpc('get_orders_billing_search', {
+            p_search: filters?.search?.trim() || null,
+            p_status: filters?.statusFilter || null,
+            p_creation_id:
+                filters?.creationIdFilter?.trim() && /^\d+$/.test(filters.creationIdFilter.trim())
+                    ? parseInt(filters.creationIdFilter.trim(), 10)
+                    : null,
+            p_limit: pageSize,
+            p_offset: (page - 1) * pageSize,
+        });
+
+        if (!rpcResult.error && rpcResult.data) {
+            const data = rpcResult.data as { order_ids: string[] | null; total: number };
+            const orderIds = data.order_ids || [];
+            const total = Number(data.total) ?? 0;
+            if (orderIds.length === 0) {
+                return { orders: [], total };
+            }
+            const { data: ordersData, error: fetchError } = await db
+                .from('orders')
+                .select('*')
+                .in('id', orderIds);
+            if (fetchError) {
+                console.error('Error fetching orders by ids:', fetchError);
+                return { orders: [], total };
+            }
+            const orders = (ordersData || []).slice(0, orderIds.length);
+            const orderById = new Map(orders.map((o: any) => [o.id, o]));
+            const ordered = orderIds.map((id) => orderById.get(id)).filter(Boolean);
+            const enriched = await enrichOrdersPage(db, ordered);
+            return { orders: enriched, total };
+        }
+        if (rpcResult.error) {
+            console.warn('get_orders_billing_search RPC failed (run sql/get_orders_billing_search_rpc.sql?), falling back to application-level search:', rpcResult.error.message);
+            return getOrdersWithSearchFallback(db, page, pageSize, filters);
+        }
+    }
+
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+
+    let countQuery = db.from('orders').select('*', { count: 'exact', head: true });
+    let dataQuery = db
+        .from('orders')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .range(from, to);
+
+    if (brooklynClientIds) {
+        countQuery = countQuery.in('client_id', brooklynClientIds);
+        dataQuery = dataQuery.in('client_id', brooklynClientIds);
+    }
+
+    if (filters?.statusFilter && filters.statusFilter !== 'all') {
+        countQuery = countQuery.eq('status', filters.statusFilter);
+        dataQuery = dataQuery.eq('status', filters.statusFilter);
+    }
+    // creation_id filter only applied when using RPC (column may not exist on all deployments)
+
+    const [countResult, dataResult] = await Promise.all([countQuery, dataQuery]);
+
+    if (countResult.error) {
+        console.error('Error fetching orders count:', countResult.error);
+        return { orders: [], total: 0 };
+    }
+    if (dataResult.error) {
+        console.error('Error fetching orders page:', dataResult.error);
+        return { orders: [], total: countResult.count ?? 0 };
+    }
+
+    const total = countResult.count ?? 0;
+    const orders = dataResult.data || [];
+    const enriched = await enrichOrdersPage(db, orders);
+
+    return { orders: enriched, total };
+}
+
+/** Fallback when get_orders_billing_search RPC is unavailable. Applies search, status, creation_id via separate queries. */
+async function getOrdersWithSearchFallback(
+    db: SupabaseClient,
+    page: number,
+    pageSize: number,
+    filters?: GetOrdersBillingFilters,
+    clientIdAllowlist?: string[],
+): Promise<{ orders: any[]; total: number }> {
+    if (clientIdAllowlist && clientIdAllowlist.length === 0) {
+        return { orders: [], total: 0 };
+    }
+
+    const search = filters?.search?.trim() || '';
+    const statusFilter = filters?.statusFilter && filters.statusFilter !== 'all' ? filters.statusFilter : null;
+    // creation_id skipped in fallback - column may not exist on all deployments
+
+    let orderIds: string[] | null = null;
+
+    if (search) {
+        const term = `%${search}%`;
+        const [clientsRes, clientsByAddressRes, vendorsRes] = await Promise.all([
+            db.from('clients').select('id').ilike('full_name', term),
+            db.from('clients').select('id').ilike('address', term),
+            db.from('vendors').select('id').ilike('name', term),
+        ]);
+
+        const clientIds = new Set<string>();
+        for (const r of clientsRes.data || []) {
+            const id = (r as { id: string }).id;
+            if (!clientIdAllowlist || clientIdAllowlist.includes(id)) clientIds.add(id);
+        }
+        for (const r of clientsByAddressRes.data || []) {
+            const id = (r as { id: string }).id;
+            if (!clientIdAllowlist || clientIdAllowlist.includes(id)) clientIds.add(id);
+        }
+        const vendorIds = new Set((vendorsRes.data || []).map((r: any) => r.id));
+
+        const orderIdsByNumber = new Set<string>();
+        const numericSearch = /^\d+$/.test(search);
+        if (numericSearch) {
+            const num = parseInt(search, 10);
+            let numQ = db.from('orders').select('id').eq('order_number', num);
+            if (clientIdAllowlist?.length) numQ = numQ.in('client_id', clientIdAllowlist);
+            const { data: byNum } = await numQ;
+            (byNum || []).forEach((r: any) => orderIdsByNumber.add(r.id));
+        }
+
+        let orderIdsByVendor = new Set<string>();
+        if (vendorIds.size > 0) {
+            const [ovsRes, obsRes] = await Promise.all([
+                db.from('order_vendor_selections').select('order_id').in('vendor_id', Array.from(vendorIds)),
+                db.from('order_box_selections').select('order_id').in('vendor_id', Array.from(vendorIds)),
+            ]);
+            (ovsRes.data || []).forEach((r: any) => orderIdsByVendor.add(r.order_id));
+            (obsRes.data || []).forEach((r: any) => orderIdsByVendor.add(r.order_id));
+        }
+
+        const matchedIds = new Set<string>([...orderIdsByNumber, ...orderIdsByVendor]);
+        if (clientIds.size > 0) {
+            const { data: byClient } = await db.from('orders').select('id').in('client_id', Array.from(clientIds));
+            (byClient || []).forEach((r: any) => matchedIds.add(r.id));
+        }
+        orderIds = Array.from(matchedIds);
+    }
+
+    let baseQuery = db.from('orders').select('*', { count: 'exact' }).order('created_at', { ascending: false });
+
+    if (orderIds !== null) {
+        if (orderIds.length === 0) return { orders: [], total: 0 };
+        baseQuery = baseQuery.in('id', orderIds);
+    }
+    if (clientIdAllowlist?.length) {
+        baseQuery = baseQuery.in('client_id', clientIdAllowlist);
+    }
+    if (statusFilter) baseQuery = baseQuery.eq('status', statusFilter);
+
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+
+    const { data: ordersData, error, count } = await baseQuery.range(from, to);
+
+    if (error) {
+        console.error('Search fallback error:', error);
+        return { orders: [], total: 0 };
+    }
+
+    const total = count ?? 0;
+    const orders = ordersData || [];
+    const enriched = await enrichOrdersPage(db, orders);
+    return { orders: enriched, total };
+}
+
+export async function getAllOrders(): Promise<any[]> {
+    const serviceRoleKey = getSupabaseDbApiKey();
+    const db = serviceRoleKey
+        ? createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, serviceRoleKey, { auth: { persistSession: false } })
+        : supabase;
+
+    // Fetch all orders only (no join – same pattern as getOrdersPaginated)
+    const { data: ordersData, error } = await db
+        .from('orders')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+    if (error) {
+        console.error('Error fetching all orders:', error);
+        return [];
+    }
+
+    const orders = ordersData || [];
+    if (orders.length === 0) return [];
+
+    return enrichOrdersPage(db, orders);
+}
+
+// ---------------------------------------------------------------------------
+// ORDER BY ID
+// ---------------------------------------------------------------------------
+
+export async function getOrderById(orderId: string): Promise<OrderDetail | null> {
+    if (!orderId) return null;
+
+    const session = await verifySession();
+
+    let supabaseClient = supabase;
+    const serviceRoleKey = getSupabaseDbApiKey();
+    if (serviceRoleKey) {
+        supabaseClient = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, serviceRoleKey, {
+            auth: { persistSession: false },
+        });
+    }
+
+    const { data: orderData, error: orderError } = await supabaseClient
+        .from('orders')
+        .select('*')
+        .eq('id', orderId)
+        .single();
+
+    if (orderError || !orderData) return null;
+
+    const { data: clientData } = await supabaseClient
+        .from('clients')
+        .select('id, full_name, address, email, phone_number, unite_account')
+        .eq('id', orderData.client_id)
+        .single();
+
+    if (session?.role === 'brooklyn_admin' && (clientData as { unite_account?: string } | null)?.unite_account !== 'Brooklyn') {
+        return null;
+    }
+
+    const [menuItems, vendors, boxTypes, equipmentList, categories, mealItems] = await Promise.all([
+        getMenuItems(supabaseClient),
+        getVendors(supabaseClient),
+        getBoxTypes(supabaseClient),
+        getEquipment(supabaseClient),
+        getCategories(supabaseClient),
+        getMealItems(supabaseClient),
+    ]);
+
+    let orderDetails: any = undefined;
+
+    if (orderData.service_type === 'Food' || orderData.service_type === 'Meal') {
+        const { data: vendorSelections } = await supabaseClient
+            .from('order_vendor_selections')
+            .select('*')
+            .eq('order_id', orderId);
+
+        if (vendorSelections?.length) {
+            const vendorSelectionsWithItems = await Promise.all(
+                vendorSelections.map(async (vs: any) => {
+                    const { data: items } = await supabaseClient
+                        .from('order_items')
+                        .select('*')
+                        .eq('vendor_selection_id', vs.id);
+                    const vendor = vendors.find((v: any) => v.id === vs.vendor_id);
+                    const itemsWithDetails = (items || []).map((item: any) => {
+                        let menuItem = menuItems.find((mi: any) => mi.id === item.menu_item_id);
+                        if (!menuItem && item.meal_item_id) menuItem = mealItems.find((mi: any) => mi.id === item.meal_item_id);
+                        let itemPrice = item.custom_price != null ? parseFloat(item.custom_price) : (menuItem?.price_each ?? (item.unit_value != null ? parseFloat(item.unit_value) : 0));
+                        if (Number.isNaN(itemPrice)) itemPrice = 0;
+                        const qty = item.quantity ?? 1;
+                        const menuItemName = item.custom_name || menuItem?.name || item.notes || 'Unknown Item';
+                        return {
+                            id: item.id,
+                            menuItemId: item.menu_item_id,
+                            menuItemName,
+                            quantity: qty,
+                            unitValue: itemPrice,
+                            totalValue: itemPrice * qty,
+                            notes: item.notes || null,
+                        };
+                    });
+                    return { vendorId: vs.vendor_id, vendorName: vendor?.name || 'Unknown Vendor', items: itemsWithDetails };
+                })
+            );
+            const computedTotal = vendorSelectionsWithItems.reduce(
+                (sum, vs) => sum + (vs.items as any[]).reduce((s, i) => s + (i.totalValue ?? 0), 0),
+                0
+            );
+            orderDetails = {
+                serviceType: orderData.service_type,
+                vendorSelections: vendorSelectionsWithItems,
+                totalItems: orderData.total_items,
+                totalValue: computedTotal > 0 ? computedTotal : parseFloat(orderData.total_value || 0),
+            };
+        }
+    } else if (orderData.service_type === 'Custom') {
+        const { data: vendorSelections } = await supabaseClient
+            .from('order_vendor_selections')
+            .select('*')
+            .eq('order_id', orderId);
+        if (vendorSelections?.length) {
+            const vendorSelectionsWithItems = await Promise.all(
+                vendorSelections.map(async (vs: any) => {
+                    const { data: items } = await supabaseClient.from('order_items').select('*').eq('vendor_selection_id', vs.id);
+                    const vendor = vendors.find((v: any) => v.id === vs.vendor_id);
+                    const itemsWithDetails = (items || []).map((item: any) => ({
+                        id: item.id,
+                        menuItemName: item.custom_name || 'Custom Item',
+                        quantity: item.quantity,
+                        unitValue: parseFloat(item.custom_price || 0),
+                        totalValue: parseFloat(item.custom_price || 0) * item.quantity,
+                    }));
+                    return { vendorId: vs.vendor_id, vendorName: vendor?.name || 'Unknown Vendor', items: itemsWithDetails };
+                })
+            );
+            const computedTotal = vendorSelectionsWithItems.reduce(
+                (sum, vs) => sum + (vs.items as any[]).reduce((s, i) => s + (i.totalValue ?? 0), 0),
+                0
+            );
+            orderDetails = {
+                serviceType: 'Custom',
+                vendorSelections: vendorSelectionsWithItems,
+                totalItems: orderData.total_items,
+                totalValue: computedTotal > 0 ? computedTotal : parseFloat(orderData.total_value || 0),
+                notes: orderData.notes,
+            };
+        }
+    } else if (orderData.service_type === 'Boxes') {
+        const { data: boxSelection } = await supabaseClient
+            .from('order_box_selections')
+            .select('*')
+            .eq('order_id', orderId)
+            .maybeSingle();
+        if (boxSelection) {
+            const vendor = vendors.find((v: any) => v.id === boxSelection.vendor_id);
+            const boxType = boxTypes.find((bt: any) => bt.id === boxSelection.box_type_id);
+            const boxItems = boxSelection.items || {};
+            const itemsByCategory: Record<string, { categoryName: string; items: Array<{ itemId: string; itemName: string; quantity: number; quotaValue: number }> }> = {};
+            Object.entries(boxItems).forEach(([itemId, qty]: [string, any]) => {
+                const menuItem = menuItems.find((mi: any) => mi.id === itemId);
+                const quantity = typeof qty === 'object' && qty !== null ? (qty as any).quantity : Number(qty) || 0;
+                const category = menuItem?.category_id ? categories.find((c: any) => c.id === menuItem.category_id) : null;
+                const catId = category?.id || 'uncategorized';
+                const catName = category?.name || 'Uncategorized';
+                if (!itemsByCategory[catId]) itemsByCategory[catId] = { categoryName: catName, items: [] };
+                itemsByCategory[catId].items.push({
+                    itemId,
+                    itemName: menuItem?.name || 'Unknown Item',
+                    quantity,
+                    quotaValue: menuItem?.quota_value ?? 1,
+                });
+            });
+            orderDetails = {
+                serviceType: 'Boxes',
+                vendorId: boxSelection.vendor_id,
+                vendorName: vendor?.name || 'Unknown Vendor',
+                boxTypeId: boxSelection.box_type_id,
+                boxTypeName: boxType?.name || 'Unknown Box Type',
+                boxQuantity: boxSelection.quantity,
+                items: boxItems,
+                itemsByCategory,
+                totalValue: boxSelection.total_value ? parseFloat(boxSelection.total_value) : parseFloat(orderData.total_value || 0),
+            };
+        } else {
+            orderDetails = {
+                serviceType: 'Boxes',
+                vendorName: 'Unknown Vendor (Missing Selection Data)',
+                itemsByCategory: {},
+                totalValue: parseFloat(orderData.total_value || 0),
+            };
+        }
+    } else if (orderData.service_type === 'Equipment') {
+        try {
+            const notes = orderData.notes ? JSON.parse(orderData.notes) : null;
+            if (notes) {
+                const vendor = vendors.find((v: any) => v.id === notes.vendorId);
+                const equipment = equipmentList.find((e: any) => e.id === notes.equipmentId);
+                const equipmentPrice = notes.price ?? equipment?.price ?? 0;
+                const equipmentTotal = parseFloat(orderData.total_value || 0) || (typeof equipmentPrice === 'number' ? equipmentPrice : parseFloat(equipmentPrice) || 0);
+                orderDetails = {
+                    serviceType: 'Equipment',
+                    vendorName: vendor?.name || 'Unknown Vendor',
+                    equipmentName: notes.equipmentName || equipment?.name || 'Unknown Equipment',
+                    price: equipmentPrice,
+                    totalValue: equipmentTotal,
+                };
+            }
+        } catch (_) {
+            const { data: vs } = await supabaseClient
+                .from('order_vendor_selections')
+                .select('*')
+                .eq('order_id', orderId)
+                .limit(1)
+                .maybeSingle();
+            if (vs) {
+                const vendor = vendors.find((v: any) => v.id === vs.vendor_id);
+                orderDetails = {
+                    serviceType: 'Equipment',
+                    vendorName: vendor?.name || 'Unknown Vendor',
+                    totalValue: parseFloat(orderData.total_value || 0),
+                };
+            }
+        }
+    }
+
+    const proofUrls = orderRowProofUrls(orderData as any);
+    const proofUrl =
+        proofUrls[0] ||
+        primaryProofUrl(orderData as any) ||
+        (orderData as any).delivery_proof_url ||
+        '';
+    const lastUpdated = orderData.last_updated || orderData.updated_at;
+
+    return {
+        id: orderData.id,
+        orderNumber: orderData.order_number,
+        clientId: orderData.client_id,
+        clientName: clientData?.full_name || 'Unknown Client',
+        clientAddress: clientData?.address || '',
+        clientEmail: clientData?.email || '',
+        clientPhone: clientData?.phone_number || '',
+        serviceType: orderData.service_type,
+        caseId: orderData.case_id,
+        status: orderData.status,
+        scheduledDeliveryDate: orderData.scheduled_delivery_date,
+        actualDeliveryDate: orderData.actual_delivery_date,
+        deliveryProofUrl: proofUrl,
+        deliveryProofUrls: proofUrls.length > 0 ? proofUrls : proofUrl ? [proofUrl] : [],
+        totalValue: (orderDetails?.totalValue != null && orderDetails.totalValue > 0) ? orderDetails.totalValue : parseFloat(orderData.total_value || 0),
+        totalItems: orderData.total_items,
+        notes: orderData.notes,
+        createdAt: orderData.created_at,
+        lastUpdated: lastUpdated ?? orderData.created_at,
+        updatedBy: orderData.updated_by,
+        orderDetails,
+    };
+}
+
+// ---------------------------------------------------------------------------
+// DELETE ORDER
+// ---------------------------------------------------------------------------
+
+export async function deleteOrder(orderId: string): Promise<{ success: boolean; message?: string }> {
+    if (!orderId) return { success: false, message: 'Order ID is required' };
+    const session = await verifySession();
+    if (session?.role === 'brooklyn_admin') {
+        return { success: false, message: 'Brooklyn admins cannot delete orders' };
+    }
+    const serviceRoleKey = getSupabaseDbApiKey();
+    if (!serviceRoleKey) return { success: false, message: 'Server configuration error: SUPABASE_SECRET_KEY (or legacy service role) required for delete' };
+    try {
+        const supabaseAdmin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, serviceRoleKey, {
+            auth: { persistSession: false },
+        });
+
+        const { data: vendorSelections } = await supabaseAdmin
+            .from('order_vendor_selections')
+            .select('id')
+            .eq('order_id', orderId);
+        if (vendorSelections?.length) {
+            const vsIds = vendorSelections.map((vs) => vs.id);
+            await supabaseAdmin.from('order_items').delete().in('vendor_selection_id', vsIds);
+            await supabaseAdmin.from('order_vendor_selections').delete().eq('order_id', orderId);
+        }
+        await supabaseAdmin.from('order_box_selections').delete().eq('order_id', orderId);
+        await supabaseAdmin.from('orders').delete().eq('id', orderId);
+
+        revalidatePath('/orders');
+        revalidatePath(`/orders/${orderId}`);
+        revalidatePath('/billing');
+        return { success: true };
+    } catch (error: any) {
+        console.error('Error deleting order:', error);
+        return { success: false, message: error.message || 'An unknown error occurred' };
+    }
+}
+
+// ---------------------------------------------------------------------------
+// BILLING HISTORY (per client)
+// ---------------------------------------------------------------------------
+
+export async function getBillingHistory(clientId: string): Promise<any[]> {
+    if (!clientId) return [];
+    const { data, error } = await supabase
+        .from('billing_records')
+        .select('*')
+        .eq('client_id', clientId)
+        .order('created_at', { ascending: false });
+    if (error) {
+        console.error('Error fetching billing history:', error);
+        return [];
+    }
+    const [menuItems, vendors, boxTypes] = await Promise.all([
+        getMenuItems(supabase),
+        getVendors(supabase),
+        getBoxTypes(supabase),
+    ]);
+    const billingRecords = data || [];
+    const recordsWithOrderData = await Promise.all(
+        billingRecords.map(async (d: any) => {
+            let orderDetails: any = undefined;
+            if (d.order_id) {
+                const { data: orderData, error: orderError } = await supabase
+                    .from('orders')
+                    .select('*')
+                    .eq('id', d.order_id)
+                    .single();
+                if (!orderError && orderData) {
+                    if (orderData.service_type === 'Food') {
+                        const { data: vendorSelections } = await supabase
+                            .from('order_vendor_selections')
+                            .select('*')
+                            .eq('order_id', d.order_id);
+                        if (vendorSelections?.length) {
+                            const vendorSelectionsWithItems = await Promise.all(
+                                vendorSelections.map(async (vs: any) => {
+                                    const { data: items } = await supabase
+                                        .from('order_items')
+                                        .select('*')
+                                        .eq('vendor_selection_id', vs.id);
+                                    const vendor = vendors.find((v: any) => v.id === vs.vendor_id);
+                                    const itemsWithDetails = (items || [])
+                                        .filter((item: any) => item.menu_item_id != null)
+                                        .map((item: any) => {
+                                            const menuItem = menuItems.find((mi: any) => mi.id === item.menu_item_id);
+                                            const itemPrice = menuItem?.price_each ?? parseFloat(item.unit_value || '0');
+                                            return {
+                                                menuItemName: menuItem?.name || 'Unknown Item',
+                                                quantity: item.quantity,
+                                                unitValue: itemPrice,
+                                                totalValue: itemPrice * item.quantity,
+                                            };
+                                        });
+                                    return { vendorName: vendor?.name || 'Unknown Vendor', items: itemsWithDetails };
+                                })
+                            );
+                            const totalValue = vendorSelectionsWithItems.reduce(
+                                (sum, vs) => sum + (vs.items as any[]).reduce((s, i) => s + i.totalValue, 0),
+                                0
+                            );
+                            orderDetails = { serviceType: 'Food', vendorSelections: vendorSelectionsWithItems, totalValue };
+                        }
+                    } else if (orderData.service_type === 'Boxes') {
+                        const { data: boxSelection } = await supabase
+                            .from('order_box_selections')
+                            .select('*')
+                            .eq('order_id', d.order_id)
+                            .maybeSingle();
+                        if (boxSelection) {
+                            const vendor = vendors.find((v: any) => v.id === boxSelection.vendor_id);
+                            const boxType = boxTypes.find((bt: any) => bt.id === boxSelection.box_type_id);
+                            orderDetails = {
+                                serviceType: 'Boxes',
+                                vendorName: vendor?.name || 'Unknown Vendor',
+                                boxTypeName: boxType?.name || 'Unknown Box Type',
+                                boxQuantity: boxSelection.quantity,
+                                totalValue: boxSelection.total_value ? parseFloat(boxSelection.total_value) : parseFloat(orderData.total_value || 0),
+                            };
+                        }
+                    } else {
+                        orderDetails = { serviceType: orderData.service_type, totalValue: parseFloat(orderData.total_value || 0), notes: orderData.notes };
+                    }
+                }
+            }
+            let amount = d.amount;
+            if (orderDetails?.totalValue !== undefined) amount = orderDetails.totalValue;
+            return {
+                id: d.id,
+                clientId: d.client_id,
+                status: d.status,
+                amount,
+                createdAt: d.created_at,
+                date: d.date || new Date(d.created_at).toLocaleDateString(),
+                method: d.method || 'N/A',
+                orderId: d.order_id,
+                orderDetails,
+            };
+        })
+    );
+    return recordsWithOrderData;
+}
+
+// ---------------------------------------------------------------------------
+// BILLING REQUESTS BY WEEK
+// ---------------------------------------------------------------------------
+
+export async function getBillingRequestsByWeek(weekStartDate?: Date): Promise<BillingRequest[]> {
+    let supabaseClient = supabase;
+    const serviceRoleKey = getSupabaseDbApiKey();
+    if (serviceRoleKey) {
+        supabaseClient = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, serviceRoleKey, {
+            auth: { persistSession: false },
+        });
+    }
+
+    const PAGE_SIZE = 1000;
+    const allOrdersData: any[] = [];
+    let ordersOffset = 0;
+    let ordersHasMore = true;
+    while (ordersHasMore) {
+        const { data: page, error: ordersError } = await supabaseClient
+            .from('orders')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .range(ordersOffset, ordersOffset + PAGE_SIZE - 1);
+        if (ordersError) {
+            console.error('Error fetching orders:', ordersError);
+            return [];
+        }
+        const rows = page || [];
+        allOrdersData.push(...rows);
+        ordersHasMore = rows.length >= PAGE_SIZE;
+        ordersOffset += PAGE_SIZE;
+    }
+
+    // Use same enrichment as Orders list (enrichOrdersPage) so client names match
+    const enrichedOrdersData = await enrichOrdersPage(supabaseClient, allOrdersData);
+
+    const allBillingRecords: any[] = [];
+    let brOffset = 0;
+    let brHasMore = true;
+    while (brHasMore) {
+        const { data: brPage, error: billingError } = await supabaseClient
+            .from('billing_records')
+            .select('order_id, status')
+            .eq('status', 'success')
+            .range(brOffset, brOffset + PAGE_SIZE - 1);
+        if (billingError) console.error('Error fetching billing records:', billingError);
+        const rows = brPage || [];
+        allBillingRecords.push(...rows);
+        brHasMore = rows.length >= PAGE_SIZE;
+        brOffset += PAGE_SIZE;
+    }
+    const successfulOrderIds = new Set(allBillingRecords.map((br: any) => br.order_id != null ? String(br.order_id) : null).filter(Boolean));
+
+    const allOrders = enrichedOrdersData.map((o: any) => {
+        const hasProof = hasAnyProofUrl(o as any) || !!(o as any).delivery_proof_url;
+        const isBilled = successfulOrderIds.has(String(o.id));
+        return {
+            ...o,
+            amount: o.total_value || 0,
+            hasProof,
+            isBilled,
+        };
+    });
+
+    let filteredOrders = allOrders;
+    if (weekStartDate) {
+        filteredOrders = allOrders.filter((order) => {
+            const deliveryDateStr = order.actual_delivery_date || order.scheduled_delivery_date;
+            const dateToUse = deliveryDateStr ? new Date(deliveryDateStr) : order.created_at ? new Date(order.created_at) : null;
+            if (!dateToUse) return false;
+            return isDateInWeek(dateToUse, weekStartDate);
+        });
+    }
+
+    // Group by household: dependants' orders are billed under their parent. Build client_id -> parent id and parent id -> name.
+    const orderClientIds = [...new Set(filteredOrders.map((o: any) => o.client_id).filter(Boolean))].map(String);
+    const clientIdToParentId = new Map<string, string>();
+    const parentIdToName = new Map<string, string>();
+    if (orderClientIds.length > 0) {
+        const { data: clientsForParent } = await supabaseClient
+            .from('clients')
+            .select('id, parent_client_id, full_name')
+            .in('id', orderClientIds);
+        (clientsForParent || []).forEach((c: any) => {
+            const id = String(c.id);
+            const parentId = c.parent_client_id != null ? String(c.parent_client_id) : id;
+            clientIdToParentId.set(id, parentId);
+            if (c.parent_client_id == null) parentIdToName.set(id, c.full_name || 'Unknown');
+        });
+        // Ensure parent names for dependants (parent may not be in orderClientIds)
+        const parentIds = [...new Set(clientIdToParentId.values())];
+        const missingParentIds = parentIds.filter((pid) => !parentIdToName.has(pid));
+        if (missingParentIds.length > 0) {
+            const { data: parents } = await supabaseClient
+                .from('clients')
+                .select('id, full_name')
+                .in('id', missingParentIds);
+            (parents || []).forEach((p: any) => parentIdToName.set(String(p.id), p.full_name || 'Unknown'));
+        }
+    }
+
+    const billingRequestsMap = new Map<string, BillingRequest>();
+    for (const order of filteredOrders) {
+        const deliveryDateStr = order.actual_delivery_date || order.scheduled_delivery_date;
+        const deliveryDate = deliveryDateStr ? new Date(deliveryDateStr) : order.created_at ? new Date(order.created_at) : null;
+        if (!deliveryDate) continue;
+        deliveryDate.setHours(12, 0, 0, 0);
+        const weekStart = getWeekStart(deliveryDate);
+        weekStart.setHours(0, 0, 0, 0);
+        const weekEnd = getWeekEnd(deliveryDate);
+        const weekStartDateStr = toDateStringInAppTz(weekStart);
+        const householdId = clientIdToParentId.get(String(order.client_id)) ?? order.client_id;
+        const weekKey = `${householdId}-${weekStartDateStr}`;
+        const weekRange = getWeekRangeString(deliveryDate);
+
+        if (!billingRequestsMap.has(weekKey)) {
+            billingRequestsMap.set(weekKey, {
+                clientId: householdId,
+                clientName: parentIdToName.get(householdId) ?? order.clientName ?? 'Unknown',
+                weekStart: weekStart.toISOString(),
+                weekEnd: weekEnd.toISOString(),
+                weekRange,
+                orders: [],
+                equipmentOrders: [],
+                totalAmount: 0,
+                orderCount: 0,
+                readyForBilling: true,
+                billingCompleted: true,
+                billingStatus: 'pending',
+                equipmentTotalAmount: 0,
+                equipmentOrderCount: 0,
+                equipmentReadyForBilling: true,
+                equipmentBillingCompleted: true,
+                equipmentBillingStatus: 'pending',
+            });
+        }
+        const request = billingRequestsMap.get(weekKey)!;
+        const isEquipment = order.service_type === 'Equipment';
+        if (isEquipment) {
+            request.equipmentOrders.push(order);
+            request.equipmentTotalAmount += order.amount || 0;
+            request.equipmentOrderCount += 1;
+        } else {
+            request.orders.push(order);
+            request.totalAmount += order.amount || 0;
+        }
+        request.orderCount = request.orders.length + request.equipmentOrders.length;
+    }
+
+    for (const request of billingRequestsMap.values()) {
+        request.readyForBilling = request.orders.length === 0 || request.orders.every((o) => o.hasProof);
+        request.billingCompleted = request.orders.length === 0 || request.orders.every((o) => o.isBilled);
+        const allSuccessful = request.orders.length > 0 && request.orders.every((o) => o.status === 'billing_successful');
+        const hasFailed = request.orders.some((o) => o.status === 'billing_failed');
+        request.billingStatus = allSuccessful ? 'success' : hasFailed ? 'failed' : 'pending';
+        request.totalAmount = request.orders.reduce((s, o) => s + (o.amount || 0), 0) + request.equipmentTotalAmount;
+
+        request.equipmentReadyForBilling = request.equipmentOrders.length === 0 || request.equipmentOrders.every((o) => o.hasProof);
+        request.equipmentBillingCompleted = request.equipmentOrders.length === 0 || request.equipmentOrders.every((o) => o.isBilled);
+        const equipAllSuccessful = request.equipmentOrders.length > 0 && request.equipmentOrders.every((o) => o.status === 'billing_successful');
+        const equipHasFailed = request.equipmentOrders.some((o) => o.status === 'billing_failed');
+        request.equipmentBillingStatus = equipAllSuccessful ? 'success' : equipHasFailed ? 'failed' : 'pending';
+    }
+
+    let billingRequests = Array.from(billingRequestsMap.values()).sort((a, b) => {
+        const dateA = new Date(a.weekStart).getTime();
+        const dateB = new Date(b.weekStart).getTime();
+        if (dateB !== dateA) return dateB - dateA;
+        return a.clientName.localeCompare(b.clientName);
+    });
+
+    if (weekStartDate) {
+        const selectedWeekStart = getWeekStart(weekStartDate);
+        billingRequests = billingRequests.filter((req) => getWeekStart(new Date(req.weekStart)).getTime() === selectedWeekStart.getTime());
+    }
+    return billingRequests;
+}
+
+// ---------------------------------------------------------------------------
+// CLIENT (minimal)
+// ---------------------------------------------------------------------------
+
+export async function getClient(clientId: string): Promise<ClientProfileMinimal | null> {
+    if (!clientId) return null;
+    const { data, error } = await supabase.from('clients').select('id, full_name, email, address, phone_number').eq('id', clientId).single();
+    if (error || !data) return null;
+    return {
+        id: data.id,
+        fullName: data.full_name,
+        email: data.email ?? null,
+        address: data.address ?? '',
+        phoneNumber: data.phone_number ?? '',
+    };
+}

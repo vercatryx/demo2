@@ -1,0 +1,159 @@
+import { createClient } from '@supabase/supabase-js';
+import { getSupabaseDbApiKey } from '@/lib/supabase-env';
+import { OrderDeliveryFlow } from './OrderDeliveryFlow';
+import { orderRowProofUrls } from '@/lib/proof-of-delivery-urls';
+import { notFound } from 'next/navigation';
+import type { Metadata } from 'next';
+import '../delivery.css';
+
+/** Driver delivery page must reflect latest proof URLs after produce upload. */
+export const dynamic = 'force-dynamic';
+
+type Props = { params: Promise<{ id: string }> };
+
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const { id } = await params;
+  const supabaseAdmin = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    getSupabaseDbApiKey()!
+  );
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+  let query = supabaseAdmin.from('orders').select('order_number').limit(1);
+  if (isUuid) query = query.eq('id', id);
+  else {
+    const n = parseInt(id, 10);
+    query = Number.isNaN(n) ? query.eq('order_number', id) : query.eq('order_number', n);
+  }
+  const { data: order } = await query.maybeSingle();
+  if (!order) {
+    let q2 = supabaseAdmin.from('upcoming_orders').select('order_number').limit(1);
+    if (isUuid) q2 = q2.eq('id', id);
+    else {
+      const n = parseInt(id, 10);
+      q2 = Number.isNaN(n) ? q2.eq('order_number', id) : q2.eq('order_number', n);
+    }
+    const { data: up } = await q2.maybeSingle();
+    const num = up?.order_number ?? id;
+    return { title: `Delivery #${num}` };
+  }
+  return { title: `Delivery #${order.order_number ?? id}` };
+}
+
+export default async function OrderDeliveryPage({ params }: Props) {
+    const { id } = await params;
+
+    // Use Service Role to bypass RLS for public delivery page
+    const supabaseAdmin = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        getSupabaseDbApiKey()!
+    );
+
+    // Verify if it is a UUID
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+
+    // Fetch order details
+    let query = supabaseAdmin
+        .from('orders')
+        .select('id, order_number, client_id, scheduled_delivery_date, proof_of_delivery_url, proof_of_delivery_urls');
+
+    if (isUuid) {
+        query = query.eq('id', id);
+    } else {
+        // Assume it's an order number - Parse as int for safety
+        const idInt = parseInt(id, 10);
+        if (!isNaN(idInt)) {
+            query = query.eq('order_number', idInt);
+        } else {
+            // Fallback or prevent query if invalid number? 
+            // If parse fails, it won't match anyway.
+            query = query.eq('order_number', id);
+        }
+    }
+
+    const { data: existingOrder, error: orderError } = await query.maybeSingle();
+
+    let order = existingOrder;
+    let isUpcoming = false;
+    let upcomingOrderError = null;
+
+    if (!order && !orderError) {
+        // Try upcoming_orders
+        // Note: upcoming_orders doesn't have a delivery_proof_url column
+        let upcomingQuery = supabaseAdmin
+            .from('upcoming_orders')
+            .select('id, order_number, client_id, scheduled_delivery_date');
+
+        if (isUuid) {
+            upcomingQuery = upcomingQuery.eq('id', id);
+        } else {
+            const idInt = parseInt(id, 10);
+            if (!isNaN(idInt)) {
+                upcomingQuery = upcomingQuery.eq('order_number', idInt);
+            } else {
+                upcomingQuery = upcomingQuery.eq('order_number', id);
+            }
+        }
+
+        const { data: upcomingOrder, error: upcomingErr } = await upcomingQuery.maybeSingle();
+        upcomingOrderError = upcomingErr;
+        
+        if (upcomingOrder) {
+            order = {
+                ...upcomingOrder,
+                // upcoming_orders doesn't have delivery proof columns; use nulls until order is created
+                proof_of_delivery_url: null,
+                proof_of_delivery_urls: [],
+            };
+            isUpcoming = true;
+        }
+    }
+
+    if (orderError || upcomingOrderError || !order) {
+        return (
+            <main className="delivery-page">
+                <div className="delivery-container text-center">
+                    <div className="error-icon" style={{ marginBottom: '1.5rem' }}>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></svg>
+                    </div>
+                    <h1 className="text-title">Order Not Found</h1>
+                    <p className="text-subtitle" style={{ marginBottom: '2rem' }}>
+                        We couldn't find order <span style={{ fontFamily: 'monospace', color: 'white' }}>#{id}</span>. Please check the number and try again.
+                    </p>
+                    <a href="/delivery" className="btn-secondary" style={{ display: 'block', width: '100%', padding: '1rem', textDecoration: 'none' }}>
+                        Try Another Number
+                    </a>
+                </div>
+            </main>
+        );
+    }
+
+    // Fetch Client Name/Address and signature token
+    const { data: client } = await supabaseAdmin
+        .from('clients')
+        .select('full_name, address, phone_number, sign_token')
+        .eq('id', order.client_id)
+        .single();
+
+    const proofUrls = orderRowProofUrls(order as any);
+    const orderDetails = {
+        id: order.id,
+        orderNumber: order.order_number,
+        clientName: client?.full_name || 'Unknown Client',
+        address: client?.address || 'Unknown Address',
+        clientPhone: client?.phone_number?.trim() || null,
+        deliveryDate: order.scheduled_delivery_date,
+        alreadyDelivered:
+            proofUrls.length > 0 || !!(order as any).delivery_proof_url,
+        proofUrls,
+        clientSignToken: client?.sign_token || null
+    };
+
+    return (
+        <main className="delivery-page">
+            <h1 className="text-subtitle" style={{ marginBottom: '1.5rem', opacity: 0.7 }}>Driver Delivery App</h1>
+            <div className="delivery-container">
+                <OrderDeliveryFlow order={orderDetails} />
+            </div>
+        </main>
+    );
+}

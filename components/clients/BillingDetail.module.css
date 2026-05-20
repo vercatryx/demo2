@@ -1,0 +1,37 @@
+/* Billing detail – portable styles */
+
+.container { padding: var(--spacing-xl, 2rem); max-width: 1000px; margin: 0 auto; }
+.header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--spacing-xl, 2rem); }
+.title { font-size: 1.75rem; font-weight: 700; color: var(--text-primary, #111); }
+.summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--spacing-lg, 1.5rem); margin-bottom: var(--spacing-xl, 2rem); }
+.summaryCard { background: var(--bg-surface, #f5f5f5); border: 1px solid var(--border-color, #ddd); border-radius: var(--radius-lg, 8px); padding: var(--spacing-lg, 1.5rem); box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+.label { font-size: 0.875rem; color: var(--text-secondary, #555); margin-bottom: 0.5rem; }
+.value { font-size: 1.5rem; font-weight: 700; color: var(--text-primary, #111); }
+.tableContainer { background: var(--bg-surface, #fff); border: 1px solid var(--border-color, #ddd); border-radius: var(--radius-lg, 8px); overflow: hidden; margin-top: var(--spacing-xl, 2rem); }
+.tableTitle { padding: var(--spacing-lg, 1.5rem); font-size: 1.125rem; font-weight: 600; border-bottom: 1px solid var(--border-color, #ddd); }
+.table { width: 100%; border-collapse: collapse; }
+.th { text-align: left; padding: var(--spacing-md, 1rem) var(--spacing-lg, 1.5rem); background: var(--bg-surface-hover, #f0f0f0); color: var(--text-secondary, #555); font-weight: 600; font-size: 0.875rem; }
+.td { padding: var(--spacing-md, 1rem) var(--spacing-lg, 1.5rem); border-top: 1px solid var(--border-color, #ddd); font-size: 0.9375rem; }
+.statusPaid { color: var(--color-success, #16a34a); font-weight: 600; }
+.statusUnpaid { color: var(--color-danger, #dc2626); font-weight: 600; }
+.statusPending { color: var(--color-warning, #d97706); font-weight: 600; }
+.backBtn { background: none; border: none; display: flex; align-items: center; gap: 0.5rem; color: var(--text-secondary, #555); cursor: pointer; font-size: 0.9rem; margin-bottom: var(--spacing-lg, 1.5rem); }
+.backBtn:hover { color: var(--text-primary, #111); }
+.iconBtn { background: none; border: none; display: flex; align-items: center; gap: 0.25rem; color: var(--text-secondary, #555); cursor: pointer; font-size: 0.875rem; padding: 0.25rem 0.5rem; border-radius: var(--radius-sm, 4px); }
+.iconBtn:hover { background: var(--bg-surface-hover, #f0f0f0); color: var(--text-primary, #111); }
+.expandableRow { cursor: pointer; }
+.expandableRow:hover { background: var(--bg-surface-hover, #f5f5f5); }
+.detailsCell { padding: 0 !important; background: var(--bg-surface-hover, #f5f5f5); }
+.orderDetails { padding: var(--spacing-lg, 1.5rem); background: var(--bg-surface, #fff); border-top: 2px solid var(--border-color, #ddd); }
+.orderDetailsHeader { display: flex; align-items: center; gap: 0.5rem; font-weight: 600; font-size: 1rem; margin-bottom: var(--spacing-md, 1rem); color: var(--text-primary, #111); }
+.vendorSection { margin-bottom: var(--spacing-lg, 1.5rem); padding: var(--spacing-md, 1rem); background: var(--bg-surface, #f5f5f5); border: 1px solid var(--border-color, #ddd); border-radius: var(--radius-md, 8px); }
+.vendorName { font-size: 0.9375rem; margin-bottom: var(--spacing-sm, 0.5rem); padding-bottom: var(--spacing-sm, 0.5rem); border-bottom: 1px solid var(--border-color, #ddd); }
+.itemsTable { width: 100%; border-collapse: collapse; margin-top: var(--spacing-sm, 0.5rem); font-size: 0.875rem; }
+.itemsTable thead { background: var(--bg-surface-hover, #f0f0f0); }
+.itemsTable th { text-align: left; padding: var(--spacing-sm, 0.5rem) var(--spacing-md, 1rem); font-weight: 600; color: var(--text-secondary, #555); font-size: 0.8125rem; border-bottom: 1px solid var(--border-color, #ddd); }
+.itemsTable td { padding: var(--spacing-sm, 0.5rem) var(--spacing-md, 1rem); border-bottom: 1px solid var(--border-color, #ddd); color: var(--text-primary, #111); }
+.itemsTable tbody tr:last-child td { border-bottom: none; }
+.orderSummary { display: flex; justify-content: space-between; margin-top: var(--spacing-md, 1rem); padding-top: var(--spacing-md, 1rem); border-top: 2px solid var(--border-color, #ddd); font-size: 0.9375rem; color: var(--text-primary, #111); }
+.boxDetails { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--spacing-md, 1rem); font-size: 0.9375rem; color: var(--text-primary, #111); }
+.noDetails { color: var(--text-secondary, #555); font-size: 0.875rem; font-style: italic; }
+.empty { padding: var(--spacing-xl, 2rem); text-align: center; color: var(--text-secondary, #555); font-style: italic; }

@@ -1,0 +1,909 @@
+'use client';
+
+import React from 'react';
+import Link from 'next/link';
+import { X, ExternalLink, Pencil, Trash2, Check, Loader2, MapPinned, RotateCcw } from 'lucide-react';
+import { ClientProfile, ProduceVendor } from '@/lib/types';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { updateClient, deleteClient, unarchiveClient, recordClientChange, getClientChangeLog, type ClientChangeLogEntry } from '@/lib/actions';
+import { getAllClientNumbers, normalizePhone } from '@/lib/phone-utils';
+import { getProduceVendors, getClient, invalidateClientData } from '@/lib/cached-data';
+import { buildGeocodeQuery } from '@/lib/addressHelpers';
+import { geocodeOneClient } from '@/lib/geocodeOneClient';
+import { formatDateTimeInAppTz } from '@/lib/timezone';
+import { diffObjects } from '@/lib/audit/clientDiff';
+import { inferChangeKindFromAuditDiffs } from '@/lib/audit/clientChangeKind';
+import styles from './ClientInfoShelf.module.css';
+
+interface DependantInfoShelfProps {
+    client: ClientProfile;
+    currentUserRole?: string;
+    onClose: () => void;
+    /** Opens the profile with order details (service config) for this dependant. */
+    onOpenProfile: (clientId: string) => void;
+    onClientUpdated?: (updatedClient?: ClientProfile) => void;
+    onClientDeleted?: () => void;
+}
+
+export function DependantInfoShelf({
+    client,
+    currentUserRole: _currentUserRole,
+    onClose,
+    onOpenProfile,
+    onClientUpdated,
+    onClientDeleted
+}: DependantInfoShelfProps) {
+    const [isEditing, setIsEditing] = useState(false);
+    const [isSaving, setIsSaving] = useState(false);
+    const [restoringClient, setRestoringClient] = useState(false);
+    const getInitialEditForm = useCallback((c: ClientProfile) => ({
+        fullName: c.fullName,
+        dob: c.dob || '',
+        cin: c.cin ?? '',
+        phoneNumber: c.phoneNumber || '',
+        secondaryPhoneNumber: c.secondaryPhoneNumber || '',
+        address: c.address || '',
+        apt: c.apt || '',
+        city: c.city || '',
+        state: c.state || '',
+        zip: c.zip || '',
+        notes: c.dislikes ?? '',
+        history: c.history ?? '',
+        serviceType: c.serviceType,
+        produceVendorId: c.produceVendorId || null as string | null,
+        voucherAmount: c.voucherAmount ?? '',
+        paused: c.paused ?? false,
+        complex: c.complex ?? false,
+        bill: c.bill ?? true,
+        delivery: c.delivery ?? true,
+        doNotText: c.doNotText ?? false,
+        doNotTextNumbers: c.doNotTextNumbers ?? {} as Record<string, string>,
+    }), []);
+
+    const [editForm, setEditForm] = useState(() => getInitialEditForm(client));
+    const [produceVendors, setProduceVendors] = useState<ProduceVendor[]>([]);
+    const editStartSnapshotRef = useRef<ReturnType<typeof getAuditSnapshotFromEditForm> | null>(null);
+
+    const [showChangeLog, setShowChangeLog] = useState(false);
+    const [changeLogLoading, setChangeLogLoading] = useState(false);
+    const [changeLogError, setChangeLogError] = useState<string | null>(null);
+    const [changeLogEntries, setChangeLogEntries] = useState<ClientChangeLogEntry[] | null>(null);
+
+    const [geoBusy, setGeoBusy] = useState(false);
+    const [geoErr, setGeoErr] = useState('');
+
+    useEffect(() => {
+        if (!isEditing) setEditForm(getInitialEditForm(client));
+    }, [client, isEditing, getInitialEditForm]);
+
+    function getAuditSnapshotFromClient(c: ClientProfile) {
+        const normNull = (v: unknown) => (typeof v === 'string' && v.trim() === '' ? null : v);
+        const normStr = (v: unknown, fallback: string) => (typeof v === 'string' ? v : (v == null ? fallback : String(v)));
+        return {
+            fullName: normStr(c.fullName, ''),
+            dob: normNull(c.dob) as any,
+            cin: c.cin ?? null,
+            phoneNumber: normStr(c.phoneNumber, ''),
+            secondaryPhoneNumber: normNull(c.secondaryPhoneNumber) as any,
+            address: normStr(c.address, ''),
+            apt: normNull(c.apt) as any,
+            city: normNull(c.city) as any,
+            state: normNull(c.state) as any,
+            zip: normNull(c.zip) as any,
+            notes: normNull(c.dislikes) as any,
+            history: normNull(c.history) as any,
+            serviceType: c.serviceType ?? null,
+            produceVendorId: c.produceVendorId ?? null,
+            voucherAmount: normNull(c.voucherAmount) as any,
+            paused: c.paused ?? false,
+            complex: c.complex ?? false,
+            bill: c.bill ?? true,
+            delivery: c.delivery ?? true,
+            doNotText: c.doNotText ?? false,
+            doNotTextNumbers: c.doNotTextNumbers ?? {},
+        };
+    }
+
+    function getAuditSnapshotFromEditForm(f: typeof editForm) {
+        return {
+            fullName: f.fullName ?? '',
+            dob: f.dob?.trim() ? f.dob.trim() : null,
+            cin: f.cin === '' || f.cin === null || f.cin === undefined ? null : Number(f.cin),
+            phoneNumber: f.phoneNumber?.trim() ? f.phoneNumber.trim() : '',
+            secondaryPhoneNumber: f.secondaryPhoneNumber?.trim() ? f.secondaryPhoneNumber.trim() : null,
+            address: f.address ?? '',
+            apt: f.apt?.trim() ? f.apt.trim() : null,
+            city: f.city?.trim() ? f.city.trim() : null,
+            state: f.state?.trim() ? f.state.trim() : null,
+            zip: f.zip?.trim() ? f.zip.trim() : null,
+            notes: f.notes?.trim() ? f.notes.trim() : null,
+            history: f.history?.trim() ? f.history.trim() : null,
+            serviceType: f.serviceType ?? null,
+            produceVendorId: f.serviceType === 'Produce' ? (f.produceVendorId ?? null) : null,
+            voucherAmount: f.serviceType === 'Produce' ? (f.voucherAmount?.trim() ? f.voucherAmount.trim() : null) : null,
+            paused: f.paused ?? false,
+            complex: f.complex ?? false,
+            bill: f.bill ?? true,
+            delivery: f.delivery ?? true,
+            doNotText: f.doNotText ?? false,
+            doNotTextNumbers: f.doNotTextNumbers ?? {},
+        };
+    }
+
+    function formatAuditValue(v: unknown): string {
+        if (v == null) return '—';
+        if (typeof v === 'string') return `"${v}"`;
+        if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+        try {
+            return JSON.stringify(v);
+        } catch {
+            return String(v);
+        }
+    }
+
+    function formatAuditSummary(diffs: { path: string; before: unknown; after: unknown }[]): string {
+        const byPath = new Map(diffs.map(d => [d.path, d]));
+        const out: string[] = [];
+
+        const vendorName = (id: unknown) => {
+            if (id == null || (typeof id === 'string' && id.trim() === '')) return 'unassigned';
+            const pv = produceVendors.find(v => v.id === id);
+            return pv?.name || (typeof id === 'string' ? id : String(id));
+        };
+
+        const serviceTypeDiff = byPath.get('serviceType');
+        const produceVendorDiff = byPath.get('produceVendorId');
+
+        if (serviceTypeDiff && produceVendorDiff) {
+            const beforeType = serviceTypeDiff.before;
+            const afterType = serviceTypeDiff.after;
+            if (beforeType === 'Produce' && afterType === 'Food') {
+                out.push(`serviceType: "Produce (${vendorName(produceVendorDiff.before)})" → "Food"`);
+                byPath.delete('serviceType');
+                byPath.delete('produceVendorId');
+            } else if (beforeType === 'Food' && afterType === 'Produce') {
+                out.push(`serviceType: "Food" → "Produce (${vendorName(produceVendorDiff.after)})"`);
+                byPath.delete('serviceType');
+                byPath.delete('produceVendorId');
+            }
+        }
+
+        for (const [path, d] of Array.from(byPath.entries()).sort((a, b) => a[0].localeCompare(b[0]))) {
+            if (path === 'produceVendorId') {
+                out.push(`produceVendor: "${vendorName(d.before)}" → "${vendorName(d.after)}"`);
+            } else {
+                out.push(`${path}: ${formatAuditValue(d.before)} → ${formatAuditValue(d.after)}`);
+            }
+        }
+
+        return out.join('\n');
+    }
+
+    const hasUnsavedChanges = useMemo(() => {
+        if (!isEditing) return false;
+        const start = editStartSnapshotRef.current ?? getAuditSnapshotFromClient(client);
+        const current = getAuditSnapshotFromEditForm(editForm);
+        return (
+            diffObjects(start, current, {
+                maxDepth: 6,
+                maxEntries: 200,
+                nullishEqual: true,
+                emptyStringEqualNullish: true,
+            }).length > 0
+        );
+    }, [isEditing, editForm, client]);
+
+    const beginEdit = () => {
+        editStartSnapshotRef.current = getAuditSnapshotFromClient(client);
+        setIsEditing(true);
+    };
+
+    const toggleChangeLog = async () => {
+        const next = !showChangeLog;
+        setShowChangeLog(next);
+        if (!next) return;
+        if (changeLogLoading) return;
+        if (changeLogEntries != null) return;
+
+        setChangeLogLoading(true);
+        setChangeLogError(null);
+        try {
+            const res = await getClientChangeLog(client.id, 50);
+            setChangeLogEntries(res.entries || []);
+            setChangeLogError(res.error ?? null);
+        } catch (e) {
+            setChangeLogEntries([]);
+            setChangeLogError(e instanceof Error ? e.message : 'Failed to load change log');
+        } finally {
+            setChangeLogLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        getProduceVendors().then(setProduceVendors);
+    }, []);
+
+    const hasGeocode = client.lat != null && client.lng != null && Number.isFinite(Number(client.lat)) && Number.isFinite(Number(client.lng));
+
+    const handleAutoGeocode = useCallback(async () => {
+        if (!client?.id || geoBusy) return;
+        const source = isEditing ? editForm : client;
+        const q = buildGeocodeQuery({
+            address: source.address || '',
+            city: source.city || '',
+            state: source.state || '',
+            zip: source.zip || '',
+        });
+        if (!q?.trim()) {
+            setGeoErr('Add address / city / state to geocode');
+            return;
+        }
+        setGeoBusy(true);
+        setGeoErr('');
+        try {
+            const a = await geocodeOneClient(q);
+            await updateClient(client.id, { lat: a.lat, lng: a.lng }, { skipOrderSync: true });
+            onClientUpdated?.(undefined);
+        } catch {
+            setGeoErr('Address not found');
+        } finally {
+            setGeoBusy(false);
+        }
+    }, [client?.id, isEditing, editForm.address, editForm.city, editForm.state, editForm.zip, geoBusy, onClientUpdated]);
+
+    const handleSave = async (): Promise<boolean> => {
+        setIsSaving(true);
+        try {
+            const beforeSnapshot = editStartSnapshotRef.current ?? getAuditSnapshotFromClient(client);
+            const updated = await updateClient(
+                client.id,
+                {
+                    fullName: editForm.fullName,
+                    dob: editForm.dob || null,
+                    cin: editForm.cin === '' || editForm.cin === null ? null : Number(editForm.cin),
+                    phoneNumber: editForm.phoneNumber || '',
+                    secondaryPhoneNumber: editForm.secondaryPhoneNumber || null,
+                    address: editForm.address,
+                    apt: editForm.apt || null,
+                    city: editForm.city || null,
+                    state: editForm.state || null,
+                    zip: editForm.zip || null,
+                    dislikes: editForm.notes || null,
+                    history: editForm.history || null,
+                    serviceType: editForm.serviceType,
+                    produceVendorId: editForm.serviceType === 'Produce' ? editForm.produceVendorId : null,
+                    voucherAmount: editForm.serviceType === 'Produce' ? (editForm.voucherAmount?.trim() || null) : null,
+                    paused: editForm.paused,
+                    complex: editForm.complex,
+                    bill: editForm.bill,
+                    delivery: editForm.delivery,
+                    doNotText: editForm.doNotText,
+                    doNotTextReason: editForm.doNotText ? undefined : null,
+                    doNotTextNumbers: editForm.doNotTextNumbers,
+                },
+                { skipOrderSync: true }
+            );
+
+            const afterSnapshot = getAuditSnapshotFromEditForm(editForm);
+            const diffs = diffObjects(beforeSnapshot, afterSnapshot, {
+                maxDepth: 6,
+                maxEntries: 200,
+                nullishEqual: true,
+                emptyStringEqualNullish: true,
+            });
+            if (diffs.length > 0) {
+                const summary = formatAuditSummary(diffs);
+                const kind = inferChangeKindFromAuditDiffs(diffs);
+                void recordClientChange(client.id, summary, undefined, kind).catch((e) => {
+                    console.warn('[DependantInfoShelf] Failed to record client change:', e);
+                });
+            }
+
+            setIsEditing(false);
+            editStartSnapshotRef.current = null;
+            if (onClientUpdated) onClientUpdated(updated ?? undefined);
+            return true;
+        } catch (error) {
+            console.error('Failed to update dependent:', error);
+            alert('Failed to save changes. Please try again.');
+            return false;
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const handleSaveAndClose = async () => {
+        const ok = await handleSave();
+        if (ok) onClose();
+    };
+
+    const handleCancelEdit = () => {
+        if (isSaving) {
+            window.alert('Please wait until saving finishes before leaving edit mode.');
+            return;
+        }
+        if (hasUnsavedChanges) {
+            if (!window.confirm('Discard unsaved changes? Your edits will be lost.')) return;
+        }
+        setIsEditing(false);
+        setEditForm(getInitialEditForm(client));
+        editStartSnapshotRef.current = null;
+    };
+
+    const handleOverlayClick = async () => {
+        if (!isEditing) {
+            onClose();
+            return;
+        }
+        if (isSaving) {
+            window.alert('Saving is still in progress. Please wait before closing.');
+            return;
+        }
+        await handleSaveAndClose();
+    };
+
+    const handleRestore = async () => {
+        setRestoringClient(true);
+        try {
+            await unarchiveClient(client.id);
+            invalidateClientData(client.id);
+            invalidateClientData();
+            const refreshed = await getClient(client.id);
+            if (refreshed) onClientUpdated?.(refreshed);
+        } catch (e) {
+            console.error('Restore failed:', e);
+            alert(e instanceof Error ? e.message : 'Failed to restore dependent.');
+        } finally {
+            setRestoringClient(false);
+        }
+    };
+
+    const handleDelete = async () => {
+        if (confirm(`Are you sure you want to delete ${client.fullName}? This action cannot be undone.`)) {
+            try {
+                await deleteClient(client.id);
+                onClose();
+                if (onClientDeleted) onClientDeleted();
+            } catch (error) {
+                console.error('Error deleting dependent:', error);
+                alert('Failed to delete dependent. Please try again.');
+            }
+        }
+    };
+
+    return (
+        <>
+            <div className={styles.shelfOverlay} onClick={() => void handleOverlayClick()} />
+            <div className={styles.shelf}>
+                <div className={styles.header}>
+                    <div className={styles.titleSection}>
+                        {isEditing ? (
+                            <input
+                                className={styles.editInput}
+                                value={editForm.fullName}
+                                onChange={e => setEditForm({ ...editForm, fullName: e.target.value })}
+                                autoFocus
+                                placeholder="Name"
+                            />
+                        ) : (
+                            <>
+                                <div className={styles.nameRow}>
+                                    <h2>{client.fullName}</h2>
+                                    {client.archivedAt ? <span className={styles.deletedBadge}>DELETED</span> : null}
+                                </div>
+                                <span style={{ fontSize: '0.875rem', color: 'var(--text-tertiary)' }}>Dependent</span>
+                                {client.createdAt ? (
+                                    <div style={{ fontSize: '0.875rem', color: 'var(--text-tertiary)', marginTop: '-4px' }}>
+                                        Created {formatDateTimeInAppTz(client.createdAt)}
+                                    </div>
+                                ) : null}
+                                <Link
+                                    href={`/client-portal/${client.id}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className={styles.portalLink}
+                                    title="Open client portal"
+                                >
+                                    {client.id}
+                                </Link>
+                            </>
+                        )}
+                    </div>
+                    <div className={styles.headerActions}>
+                        {isEditing ? (
+                            <>
+                                <button className={styles.saveBtn} onClick={handleSave} disabled={isSaving}>
+                                    {isSaving ? <Loader2 className="animate-spin" size={18} /> : <Check size={18} />}
+                                </button>
+                                <button className={styles.cancelBtn} onClick={handleCancelEdit}>
+                                    <X size={18} />
+                                </button>
+                            </>
+                        ) : (
+                            <>
+                                {!client.archivedAt && (
+                                    <button className={styles.editBtn} onClick={beginEdit}>
+                                        <Pencil size={18} />
+                                    </button>
+                                )}
+                                {client.archivedAt && (
+                                    <button
+                                        type="button"
+                                        className={`${styles.editBtn} ${styles.restoreBtn}`}
+                                        onClick={() => void handleRestore()}
+                                        disabled={restoringClient}
+                                        title="Restore to active client list"
+                                        aria-label="Restore dependent"
+                                        style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.8125rem', fontWeight: 600 }}
+                                    >
+                                        {restoringClient ? <Loader2 className="animate-spin" size={16} /> : <RotateCcw size={16} />}
+                                        <span>Restore</span>
+                                    </button>
+                                )}
+                                {!client.archivedAt && (
+                                    <button className={styles.deleteBtn} onClick={handleDelete}>
+                                        <Trash2 size={18} />
+                                    </button>
+                                )}
+                                <button className={styles.closeBtn} onClick={onClose}>
+                                    <X size={24} />
+                                </button>
+                            </>
+                        )}
+                    </div>
+                </div>
+
+                <div className={styles.content}>
+                    {/* Dependent-specific: Name, DOB, CIN, Service Type */}
+                    <div className={styles.section}>
+                        <h3>Dependent info</h3>
+                        <div className={styles.infoGrid}>
+                            <div className={styles.infoItem + ' ' + styles.fullWidth}>
+                                <div className={styles.label}>Name</div>
+                                <div className={styles.value}>
+                                    {isEditing ? (
+                                        <input
+                                            className={styles.editInput}
+                                            value={editForm.fullName}
+                                            onChange={e => setEditForm({ ...editForm, fullName: e.target.value })}
+                                            placeholder="Full name"
+                                        />
+                                    ) : (
+                                        client.fullName || '—'
+                                    )}
+                                </div>
+                            </div>
+                            <div className={styles.infoItem}>
+                                <div className={styles.label}>DOB</div>
+                                <div className={styles.value}>
+                                    {isEditing ? (
+                                        <input
+                                            type="date"
+                                            className={styles.editInput}
+                                            value={editForm.dob ? editForm.dob.split('T')[0] : ''}
+                                            onChange={e => setEditForm({ ...editForm, dob: e.target.value })}
+                                        />
+                                    ) : (
+                                        client.dob ? new Date(client.dob).toLocaleDateString() : '—'
+                                    )}
+                                </div>
+                            </div>
+                            <div className={styles.infoItem}>
+                                <div className={styles.label}>CIN#</div>
+                                <div className={styles.value}>
+                                    {isEditing ? (
+                                        <input
+                                            type="number"
+                                            className={styles.editInput}
+                                            value={editForm.cin === null || editForm.cin === '' || editForm.cin === undefined ? '' : String(editForm.cin)}
+                                            onChange={e => setEditForm({ ...editForm, cin: e.target.value === '' ? '' : parseFloat(e.target.value) })}
+                                            placeholder="CIN"
+                                        />
+                                    ) : (
+                                        client.cin != null ? String(client.cin) : '—'
+                                    )}
+                                </div>
+                            </div>
+                            <div className={styles.infoItem + ' ' + styles.fullWidth}>
+                                <div className={styles.label}>Service type</div>
+                                <div className={styles.value}>
+                                    {isEditing ? (
+                                        <select
+                                            className={styles.editSelect}
+                                            value={editForm.serviceType === 'Produce' ? `Produce:${editForm.produceVendorId || ''}` : 'Food'}
+                                            onChange={e => {
+                                                const val = e.target.value;
+                                                if (val.startsWith('Produce:')) {
+                                                    const pvId = val.slice('Produce:'.length) || null;
+                                                    setEditForm({ ...editForm, serviceType: 'Produce', produceVendorId: pvId });
+                                                } else {
+                                                    setEditForm({ ...editForm, serviceType: 'Food', produceVendorId: null });
+                                                }
+                                            }}
+                                        >
+                                            <option value="Food">Food</option>
+                                            <option value="Produce:">Produce (unassigned)</option>
+                                            {produceVendors.filter(pv => pv.isActive).map(pv => (
+                                                <option key={pv.id} value={`Produce:${pv.id}`}>Produce - {pv.name}</option>
+                                            ))}
+                                        </select>
+                                    ) : (
+                                        client.serviceType === 'Produce'
+                                            ? `Produce${(() => { const pv = produceVendors.find(v => v.id === client.produceVendorId); return pv ? ` - ${pv.name}` : ''; })()}`
+                                            : 'Food'
+                                    )}
+                                </div>
+                            </div>
+                            {(isEditing ? editForm.serviceType : client.serviceType) === 'Produce' && (
+                                <div className={styles.infoItem + ' ' + styles.fullWidth}>
+                                    <div className={styles.label}>Voucher amount</div>
+                                    <div className={styles.value}>
+                                        {isEditing ? (
+                                            <input
+                                                type="text"
+                                                className={styles.editInput}
+                                                value={editForm.voucherAmount}
+                                                onChange={e => setEditForm({ ...editForm, voucherAmount: e.target.value })}
+                                                placeholder="e.g. amount or reference"
+                                            />
+                                        ) : (
+                                            <span style={{ whiteSpace: 'pre-wrap' }}>{client.voucherAmount?.trim() || '—'}</span>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Phone */}
+                    <div className={styles.section}>
+                        <h3>Phone</h3>
+                        <div className={styles.infoGrid}>
+                            <div className={styles.infoItem}>
+                                <div className={styles.label}>Phone</div>
+                                <div className={styles.value}>
+                                    {isEditing ? (
+                                        <input
+                                            className={styles.editInput}
+                                            value={editForm.phoneNumber}
+                                            onChange={e => setEditForm({ ...editForm, phoneNumber: e.target.value })}
+                                            placeholder="Primary"
+                                        />
+                                    ) : (
+                                        client.phoneNumber?.trim() ? (
+                                            <a href={`tel:${client.phoneNumber.replace(/\s/g, '')}`}>{client.phoneNumber}</a>
+                                        ) : '—'
+                                    )}
+                                </div>
+                            </div>
+                            <div className={styles.infoItem}>
+                                <div className={styles.label}>Secondary Phone</div>
+                                <div className={styles.value}>
+                                    {isEditing ? (
+                                        <input
+                                            className={styles.editInput}
+                                            value={editForm.secondaryPhoneNumber}
+                                            onChange={e => setEditForm({ ...editForm, secondaryPhoneNumber: e.target.value })}
+                                            placeholder="Secondary"
+                                        />
+                                    ) : (
+                                        client.secondaryPhoneNumber?.trim() ? (
+                                            <a href={`tel:${client.secondaryPhoneNumber.replace(/\s/g, '')}`}>{client.secondaryPhoneNumber}</a>
+                                        ) : '—'
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Address only (no Unit, no Financials, no Unite Us) */}
+                    <div className={styles.section}>
+                        <h3>Address</h3>
+                        <div className={styles.infoGrid}>
+                            <div className={styles.infoItem + ' ' + styles.fullWidth}>
+                                <div className={styles.label}>Street</div>
+                                <div className={styles.value}>
+                                    {isEditing ? (
+                                        <input
+                                            className={styles.editInput}
+                                            value={editForm.address}
+                                            onChange={e => setEditForm({ ...editForm, address: e.target.value })}
+                                            placeholder="Street address"
+                                        />
+                                    ) : (
+                                        client.address?.trim() || '—'
+                                    )}
+                                </div>
+                            </div>
+                            <div className={styles.infoItem}>
+                                <div className={styles.label}>City</div>
+                                <div className={styles.value}>
+                                    {isEditing ? (
+                                        <input
+                                            className={styles.editInput}
+                                            value={editForm.city}
+                                            onChange={e => setEditForm({ ...editForm, city: e.target.value })}
+                                            placeholder="City"
+                                        />
+                                    ) : (
+                                        client.city?.trim() || '—'
+                                    )}
+                                </div>
+                            </div>
+                            <div className={styles.infoItem}>
+                                <div className={styles.label}>State</div>
+                                <div className={styles.value}>
+                                    {isEditing ? (
+                                        <input
+                                            className={styles.editInput}
+                                            value={editForm.state}
+                                            onChange={e => setEditForm({ ...editForm, state: e.target.value })}
+                                            placeholder="State"
+                                        />
+                                    ) : (
+                                        client.state?.trim() || '—'
+                                    )}
+                                </div>
+                            </div>
+                            <div className={styles.infoItem}>
+                                <div className={styles.label}>Zip</div>
+                                <div className={styles.value}>
+                                    {isEditing ? (
+                                        <input
+                                            className={styles.editInput}
+                                            value={editForm.zip}
+                                            onChange={e => setEditForm({ ...editForm, zip: e.target.value })}
+                                            placeholder="Zip"
+                                        />
+                                    ) : (
+                                        client.zip?.trim() || '—'
+                                    )}
+                                </div>
+                            </div>
+                            <div className={styles.infoItem + ' ' + styles.fullWidth}>
+                                <div className={styles.label}>Geocode</div>
+                                <div className={styles.value}>
+                                    <span style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                        {hasGeocode && (
+                                            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                                                ✓ {Number(client.lat).toFixed(4)}, {Number(client.lng).toFixed(4)}
+                                            </span>
+                                        )}
+                                        {(isEditing || !hasGeocode) && (
+                                            <>
+                                                <button
+                                                    type="button"
+                                                    className="btn btn-secondary btn-sm"
+                                                    onClick={handleAutoGeocode}
+                                                    disabled={geoBusy}
+                                                    style={{ alignSelf: 'flex-start' }}
+                                                >
+                                                    {geoBusy ? <Loader2 size={14} className="animate-spin" /> : <MapPinned size={14} />}
+                                                    {' '}{geoBusy ? 'Geocoding…' : 'Auto Geocode'}
+                                                </button>
+                                                {geoErr && <span style={{ fontSize: '0.8rem', color: 'var(--color-danger, #dc2626)' }}>{geoErr}</span>}
+                                            </>
+                                        )}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Notes only */}
+                    <div className={styles.section}>
+                        <h3>Notes</h3>
+                        <div className={styles.infoGrid}>
+                            <div className={styles.infoItem + ' ' + styles.fullWidth}>
+                                <div className={styles.label}>Notes</div>
+                                <div className={styles.value}>
+                                    {isEditing ? (
+                                        <textarea
+                                            className={styles.editTextarea}
+                                            value={editForm.notes}
+                                            onChange={e => setEditForm({ ...editForm, notes: e.target.value })}
+                                            rows={3}
+                                            placeholder="Notes, dietary restrictions, or other info"
+                                        />
+                                    ) : (
+                                        <span style={{ whiteSpace: 'pre-wrap' }}>{client.dislikes?.trim() || '—'}</span>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* History */}
+                    <div className={styles.section}>
+                        <h3>History</h3>
+                        <div className={styles.infoGrid}>
+                            <div className={styles.infoItem + ' ' + styles.fullWidth}>
+                                <div className={styles.label}>History</div>
+                                <div className={styles.value}>
+                                    {isEditing ? (
+                                        <textarea
+                                            className={styles.editTextarea}
+                                            value={editForm.history}
+                                            onChange={e => setEditForm({ ...editForm, history: e.target.value })}
+                                            rows={3}
+                                            placeholder="History / notes"
+                                        />
+                                    ) : (
+                                        <span style={{ whiteSpace: 'pre-wrap' }}>{client.history?.trim() || '—'}</span>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Flags: Paused, Complex, Bill, Delivery (e.g. mark as No delivery) */}
+                    <div className={styles.section}>
+                        <h3>Flags</h3>
+                        <div className={styles.infoGrid}>
+                            <div className={styles.infoItem + ' ' + styles.fullWidth}>
+                                <div className={styles.label}>Flags</div>
+                                <div className={styles.value}>
+                                    {isEditing ? (
+                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+                                            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={editForm.paused}
+                                                    onChange={e => setEditForm({ ...editForm, paused: e.target.checked })}
+                                                />
+                                                <span>Paused</span>
+                                            </label>
+                                            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={editForm.complex}
+                                                    onChange={e => setEditForm({ ...editForm, complex: e.target.checked })}
+                                                />
+                                                <span>Complex</span>
+                                            </label>
+                                            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={editForm.bill}
+                                                    onChange={e => setEditForm({ ...editForm, bill: e.target.checked })}
+                                                />
+                                                <span>Bill</span>
+                                            </label>
+                                            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={editForm.delivery}
+                                                    onChange={e => setEditForm({ ...editForm, delivery: e.target.checked })}
+                                                />
+                                                <span>Delivery</span>
+                                            </label>
+                                            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={editForm.doNotText}
+                                                    onChange={e => setEditForm({ ...editForm, doNotText: e.target.checked, doNotTextNumbers: e.target.checked ? editForm.doNotTextNumbers : {} })}
+                                                />
+                                                <span>Do Not Text (all)</span>
+                                            </label>
+                                            {(() => {
+                                                const nums = getAllClientNumbers(client);
+                                                if (nums.length === 0) return null;
+                                                const map = editForm.doNotTextNumbers || {};
+                                                return nums.map(raw => {
+                                                    const e164 = normalizePhone(raw);
+                                                    if (!e164) return null;
+                                                    const flagged = !!map[e164];
+                                                    return (
+                                                        <label key={e164} style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', fontSize: '0.85rem', color: '#991b1b' }}>
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={flagged}
+                                                                onChange={e => {
+                                                                    const next = { ...map };
+                                                                    if (e.target.checked) {
+                                                                        next[e164] = 'Manually flagged';
+                                                                    } else {
+                                                                        delete next[e164];
+                                                                    }
+                                                                    const allNums = getAllClientNumbers(client);
+                                                                    const allFlagged = allNums.every(r => { const n = normalizePhone(r); return !n || !!next[n]; });
+                                                                    setEditForm({ ...editForm, doNotTextNumbers: next, doNotText: allFlagged });
+                                                                }}
+                                                            />
+                                                            <span>No text: {raw}</span>
+                                                        </label>
+                                                    );
+                                                });
+                                            })()}
+                                        </div>
+                                    ) : (
+                                        (client.paused || client.complex || client.bill || client.delivery || client.doNotText) ? (
+                                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                                                {client.paused && <span className={styles.flagChip}>Paused</span>}
+                                                {client.complex && <span className={styles.flagChip}>Complex</span>}
+                                                {client.bill && <span className={styles.flagChip}>Bill</span>}
+                                                {client.delivery && <span className={styles.flagChip}>Delivery</span>}
+                                                {client.doNotText && <span className={styles.flagChip} style={{ backgroundColor: '#fee2e2', color: '#991b1b' }}>Do Not Text</span>}
+                                            </div>
+                                        ) : '—'
+                                    )}
+                                    {!isEditing && client.doNotTextNumbers && Object.keys(client.doNotTextNumbers).length > 0 && (
+                                        <div style={{ fontSize: '0.75rem', color: '#991b1b', marginTop: '4px' }}>
+                                            {Object.entries(client.doNotTextNumbers).map(([num, reason]) => (
+                                                <div key={num}>{num}: {reason}</div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className={styles.section}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: showChangeLog ? 12 : 0 }}>
+                            <h3 style={{ marginBottom: 0 }}>Changes</h3>
+                            <button
+                                type="button"
+                                onClick={toggleChangeLog}
+                                style={{
+                                    background: 'transparent',
+                                    border: 'none',
+                                    padding: 0,
+                                    color: 'var(--text-tertiary)',
+                                    fontSize: '0.85rem',
+                                    textDecoration: 'underline',
+                                    cursor: 'pointer',
+                                }}
+                            >
+                                {showChangeLog ? 'Hide changes' : 'View changes'}
+                            </button>
+                        </div>
+
+                        {showChangeLog && (
+                            <>
+                                {changeLogLoading ? (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-tertiary)' }}>
+                                        <Loader2 className="animate-spin" size={16} />
+                                        Loading…
+                                    </div>
+                                ) : changeLogError ? (
+                                    <div style={{ color: 'var(--text-tertiary)', fontSize: '0.95rem' }}>
+                                        {changeLogError}
+                                    </div>
+                                ) : (changeLogEntries && changeLogEntries.length === 0) ? (
+                                    <div style={{ color: 'var(--text-tertiary)', fontSize: '0.95rem' }}>
+                                        No changes recorded yet.
+                                    </div>
+                                ) : (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                        {(changeLogEntries || []).map((e) => (
+                                            <div key={e.id} style={{ border: '1px solid var(--border-subtle)', borderRadius: 10, padding: 10 }}>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, color: 'var(--text-tertiary)', fontSize: '0.85rem' }}>
+                                                    <div>{e.who}</div>
+                                                    <div>{formatDateTimeInAppTz(e.timestamp)}</div>
+                                                </div>
+                                                <div style={{ marginTop: 6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                                                    {e.summary}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </>
+                        )}
+                    </div>
+                </div>
+
+                <div className={styles.footer}>
+                    <button
+                        className={styles.actionBtn}
+                        onClick={() => onOpenProfile(client.id)}
+                    >
+                        Open Order Details
+                        <ExternalLink size={18} />
+                    </button>
+                </div>
+            </div>
+        </>
+    );
+}

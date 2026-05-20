@@ -1,0 +1,1568 @@
+'use client';
+
+import React from 'react';
+import Link from 'next/link';
+import {
+    X, ExternalLink, MapPin, Phone, Mail, User, Info,
+    Calendar, DollarSign, StickyNote, Square, CheckSquare,
+    Users, FileText, CheckCircle, XCircle, Clock, Download,
+    MessageSquare, Pencil, Trash2, Check, Save, Trash, Loader2, Plus,
+    MapPinned, RotateCcw
+} from 'lucide-react';
+import { ClientProfile, ClientStatus, Navigator, Submission, ProduceVendor } from '@/lib/types';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { addDependent, getDependentsByParentId, updateClient, deleteClient, unarchiveClient, recordClientChange, getClientChangeLog, type ClientChangeLogEntry } from '@/lib/actions';
+import { getAllClientNumbers, normalizePhone } from '@/lib/phone-utils';
+import { getProduceVendors, getClient, invalidateClientData } from '@/lib/cached-data';
+import { buildGeocodeQuery } from '@/lib/addressHelpers';
+import { geocodeOneClient } from '@/lib/geocodeOneClient';
+import { getSingleForm } from '@/lib/form-actions';
+import { formatDateTimeInAppTz } from '@/lib/timezone';
+import { UNITE_ACCOUNT_UI_OPTIONS } from '@/lib/uniteAccount';
+import FormFiller from '@/components/forms/FormFiller';
+import { FormSchema } from '@/lib/form-types';
+import { diffObjects } from '@/lib/audit/clientDiff';
+import { inferChangeKindFromAuditDiffs } from '@/lib/audit/clientChangeKind';
+import styles from './ClientInfoShelf.module.css';
+
+interface ClientInfoShelfProps {
+    client: ClientProfile;
+    statuses: ClientStatus[];
+    navigators: Navigator[];
+    submissions?: Submission[];
+    allClients?: ClientProfile[];
+    currentUserRole?: string;
+    onClose: () => void;
+    onOpenProfile: (clientId: string) => void;
+    /** When provided, clicking a dependant in the list opens the dependant sidebar instead of full profile. */
+    onOpenDependantShelf?: (clientId: string) => void;
+    /** Called after save; pass updated client to update list for that client only. */
+    onClientUpdated?: (updatedClient?: ClientProfile) => void;
+    onClientDeleted?: () => void;
+}
+
+export function ClientInfoShelf({
+    client,
+    statuses,
+    navigators,
+    submissions = [],
+    allClients = [],
+    currentUserRole: _currentUserRole,
+    onClose,
+    onOpenProfile,
+    onOpenDependantShelf,
+    onClientUpdated,
+    onClientDeleted
+}: ClientInfoShelfProps) {
+    const [isEditing, setIsEditing] = useState(false);
+    const [isSaving, setIsSaving] = useState(false);
+    const [restoringClient, setRestoringClient] = useState(false);
+    const getInitialEditForm = useCallback((c: ClientProfile) => ({
+        fullName: c.fullName,
+        dob: c.dob || '',
+        statusId: c.statusId,
+        navigatorId: c.navigatorId,
+        phoneNumber: c.phoneNumber,
+        secondaryPhoneNumber: c.secondaryPhoneNumber || '',
+        email: c.email || '',
+        address: c.address,
+        apt: c.apt || '',
+        city: c.city || '',
+        state: c.state || '',
+        zip: c.zip || '',
+        county: c.county || '',
+        notes: c.dislikes ?? '',
+        caseIdExternal: c.caseIdExternal || '',
+        authorizedAmount: c.authorizedAmount || 0,
+        voucherAmount: c.voucherAmount ?? '',
+        expirationDate: c.expirationDate || '',
+        approvedMealsPerWeek: c.approvedMealsPerWeek || 0,
+        caseId: c.activeOrder?.caseId || '',
+        serviceType: c.serviceType,
+        produceVendorId: c.produceVendorId || null as string | null,
+        paused: c.paused ?? false,
+        complex: c.complex ?? false,
+        bill: c.bill ?? true,
+        delivery: c.delivery ?? true,
+        doNotText: c.doNotText ?? false,
+        doNotTextNumbers: c.doNotTextNumbers ?? {} as Record<string, string>,
+        uniteAccount: c.uniteAccount ?? 'Regular',
+        history: c.history ?? '',
+    }), []);
+
+    const [editForm, setEditForm] = useState(() => getInitialEditForm(client));
+    const editStartSnapshotRef = useRef<ReturnType<typeof getAuditSnapshotFromEditForm> | null>(null);
+    const [showChangeLog, setShowChangeLog] = useState(false);
+    const [changeLogLoading, setChangeLogLoading] = useState(false);
+    const [changeLogError, setChangeLogError] = useState<string | null>(null);
+    const [changeLogEntries, setChangeLogEntries] = useState<ClientChangeLogEntry[] | null>(null);
+
+    // Dependent State
+    const [showAddDependentForm, setShowAddDependentForm] = useState(false);
+    const [dependentName, setDependentName] = useState('');
+    const [dependentDob, setDependentDob] = useState('');
+    const [dependentCin, setDependentCin] = useState('');
+    const [dependentServiceType, setDependentServiceType] = useState<'Food' | 'Produce'>('Food');
+    const [dependentProduceVendorId, setDependentProduceVendorId] = useState<string | null>(null);
+    const [produceVendors, setProduceVendors] = useState<ProduceVendor[]>([]);
+    const [creatingDependent, setCreatingDependent] = useState(false);
+    const [loadingDependents, setLoadingDependents] = useState(false);
+    const [localDependents, setLocalDependents] = useState<ClientProfile[]>([]);
+    const [deletingDependentId, setDeletingDependentId] = useState<string | null>(null);
+    const [restoringDependentId, setRestoringDependentId] = useState<string | null>(null);
+
+    // Screening State
+    const [loadingForm, setLoadingForm] = useState(false);
+    const [isFillingForm, setIsFillingForm] = useState(false);
+    const [formSchema, setFormSchema] = useState<FormSchema | null>(null);
+
+    // Geocode State
+    const [geoBusy, setGeoBusy] = useState(false);
+    const [geoErr, setGeoErr] = useState('');
+
+    useEffect(() => {
+        if (!isEditing) setEditForm(getInitialEditForm(client));
+    }, [client, isEditing, getInitialEditForm]);
+
+    function getAuditSnapshotFromClient(c: ClientProfile) {
+        const normNull = (v: unknown) => (typeof v === 'string' && v.trim() === '' ? null : v);
+        const normStr = (v: unknown, fallback: string) => (typeof v === 'string' ? v : (v == null ? fallback : String(v)));
+        return {
+            fullName: normStr(c.fullName, ''),
+            dob: normNull(c.dob) as any,
+            statusId: c.statusId ?? null,
+            navigatorId: c.navigatorId ?? null,
+            phoneNumber: normStr(c.phoneNumber, ''),
+            secondaryPhoneNumber: normNull(c.secondaryPhoneNumber) as any,
+            email: normNull(c.email) as any,
+            address: normStr(c.address, ''),
+            apt: normNull(c.apt) as any,
+            city: normNull(c.city) as any,
+            state: normNull(c.state) as any,
+            zip: normNull(c.zip) as any,
+            county: normNull(c.county) as any,
+            notes: normNull(c.dislikes) as any,
+            caseIdExternal: normNull(c.caseIdExternal) as any,
+            authorizedAmount: c.authorizedAmount ?? 0,
+            voucherAmount: normNull(c.voucherAmount) as any,
+            expirationDate: normNull(c.expirationDate) as any,
+            approvedMealsPerWeek: c.approvedMealsPerWeek ?? 0,
+            serviceType: c.serviceType ?? null,
+            produceVendorId: c.produceVendorId ?? null,
+            paused: c.paused ?? false,
+            complex: c.complex ?? false,
+            bill: c.bill ?? true,
+            delivery: c.delivery ?? true,
+            doNotText: c.doNotText ?? false,
+            doNotTextNumbers: c.doNotTextNumbers ?? {},
+            uniteAccount: normNull(c.uniteAccount) as any,
+            history: normNull(c.history) as any,
+        };
+    }
+
+    function getAuditSnapshotFromEditForm(f: typeof editForm) {
+        return {
+            fullName: f.fullName ?? '',
+            dob: f.dob?.trim() ? f.dob.trim() : null,
+            statusId: f.statusId ?? null,
+            navigatorId: f.navigatorId ?? null,
+            phoneNumber: f.phoneNumber ?? '',
+            secondaryPhoneNumber: f.secondaryPhoneNumber?.trim() ? f.secondaryPhoneNumber.trim() : null,
+            email: f.email?.trim() ? f.email.trim() : null,
+            address: f.address ?? '',
+            apt: f.apt?.trim() ? f.apt.trim() : null,
+            city: f.city?.trim() ? f.city.trim() : null,
+            state: f.state?.trim() ? f.state.trim() : null,
+            zip: f.zip?.trim() ? f.zip.trim() : null,
+            county: f.county?.trim() ? f.county.trim() : null,
+            notes: f.notes?.trim() ? f.notes.trim() : null,
+            caseIdExternal: f.caseIdExternal?.trim() ? f.caseIdExternal.trim() : null,
+            authorizedAmount: f.authorizedAmount ?? 0,
+            voucherAmount: f.serviceType === 'Produce' ? (f.voucherAmount?.trim() ? f.voucherAmount.trim() : null) : null,
+            expirationDate: f.expirationDate?.trim() ? f.expirationDate.trim() : null,
+            approvedMealsPerWeek: f.approvedMealsPerWeek ?? 0,
+            serviceType: f.serviceType ?? null,
+            produceVendorId: f.serviceType === 'Produce' ? (f.produceVendorId ?? null) : null,
+            paused: f.paused ?? false,
+            complex: f.complex ?? false,
+            bill: f.bill ?? true,
+            delivery: f.delivery ?? true,
+            doNotText: f.doNotText ?? false,
+            doNotTextNumbers: f.doNotTextNumbers ?? {},
+            uniteAccount: f.uniteAccount?.trim() ? f.uniteAccount.trim() : null,
+            history: f.history?.trim() ? f.history.trim() : null,
+        };
+    }
+
+    function formatAuditValue(v: unknown): string {
+        if (v == null) return '—';
+        if (typeof v === 'string') return `"${v}"`;
+        if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+        try {
+            return JSON.stringify(v);
+        } catch {
+            return String(v);
+        }
+    }
+
+    function formatAuditSummary(diffs: { path: string; before: unknown; after: unknown }[]): string {
+        const byPath = new Map(diffs.map(d => [d.path, d]));
+        const out: string[] = [];
+
+        const vendorName = (id: unknown) => {
+            if (id == null || (typeof id === 'string' && id.trim() === '')) return 'unassigned';
+            const pv = produceVendors.find(v => v.id === id);
+            return pv?.name || (typeof id === 'string' ? id : String(id));
+        };
+
+        const statusName = (id: unknown) => {
+            if (id == null || (typeof id === 'string' && id.trim() === '')) return '—';
+            const st = statuses.find(s => s.id === id);
+            return st?.name || (typeof id === 'string' ? id : String(id));
+        };
+
+        const navigatorName = (id: unknown) => {
+            if (id == null || (typeof id === 'string' && id.trim() === '')) return '—';
+            const nav = navigators.find(n => n.id === id);
+            return nav?.name || (typeof id === 'string' ? id : String(id));
+        };
+
+        const serviceTypeDiff = byPath.get('serviceType');
+        const produceVendorDiff = byPath.get('produceVendorId');
+
+        if (serviceTypeDiff && produceVendorDiff) {
+            const beforeType = serviceTypeDiff.before;
+            const afterType = serviceTypeDiff.after;
+            // Make Produce ↔ Food transitions readable (collapse vendorId noise).
+            if (beforeType === 'Produce' && afterType === 'Food') {
+                out.push(`serviceType: "Produce (${vendorName(produceVendorDiff.before)})" → "Food"`);
+                byPath.delete('serviceType');
+                byPath.delete('produceVendorId');
+            } else if (beforeType === 'Food' && afterType === 'Produce') {
+                out.push(`serviceType: "Food" → "Produce (${vendorName(produceVendorDiff.after)})"`);
+                byPath.delete('serviceType');
+                byPath.delete('produceVendorId');
+            }
+        }
+
+        for (const [path, d] of Array.from(byPath.entries()).sort((a, b) => a[0].localeCompare(b[0]))) {
+            if (path === 'statusId') {
+                out.push(`status: "${statusName(d.before)}" → "${statusName(d.after)}"`);
+            } else if (path === 'navigatorId') {
+                out.push(`navigator: "${navigatorName(d.before)}" → "${navigatorName(d.after)}"`);
+            } else if (path === 'produceVendorId') {
+                out.push(`produceVendor: "${vendorName(d.before)}" → "${vendorName(d.after)}"`);
+            } else {
+                out.push(`${path}: ${formatAuditValue(d.before)} → ${formatAuditValue(d.after)}`);
+            }
+        }
+
+        return out.join('\n');
+    }
+
+    const hasUnsavedChanges = useMemo(() => {
+        if (!isEditing) return false;
+        const start = editStartSnapshotRef.current ?? getAuditSnapshotFromClient(client);
+        const current = getAuditSnapshotFromEditForm(editForm);
+        return (
+            diffObjects(start, current, {
+                ignorePathPrefixes: [],
+                maxDepth: 6,
+                maxEntries: 200,
+                nullishEqual: true,
+                emptyStringEqualNullish: true,
+            }).length > 0
+        );
+    }, [isEditing, editForm, client]);
+
+    const beginEdit = () => {
+        editStartSnapshotRef.current = getAuditSnapshotFromClient(client);
+        setIsEditing(true);
+    };
+
+    const toggleChangeLog = async () => {
+        const next = !showChangeLog;
+        setShowChangeLog(next);
+        if (!next) return;
+        if (changeLogLoading) return;
+        if (changeLogEntries != null) return;
+
+        setChangeLogLoading(true);
+        setChangeLogError(null);
+        try {
+            const res = await getClientChangeLog(client.id, 50);
+            setChangeLogEntries(res.entries || []);
+            setChangeLogError(res.error ?? null);
+        } catch (e) {
+            setChangeLogEntries([]);
+            setChangeLogError(e instanceof Error ? e.message : 'Failed to load change log');
+        } finally {
+            setChangeLogLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        getProduceVendors().then(setProduceVendors);
+    }, []);
+
+    // Load dependents from allClients when provided (stable list = no refetch every render). When allClients empty, fetch per parent + deleted flag.
+    const lastDependentsFetchKeyRef = React.useRef<string | null>(null);
+    useEffect(() => {
+        const fetchKey = `${client.id}:${client.archivedAt ? '1' : '0'}`;
+        if (allClients.length > 0) {
+            setLocalDependents(allClients.filter(c => c.parentClientId === client.id));
+            setLoadingDependents(false);
+        } else {
+            if (lastDependentsFetchKeyRef.current === fetchKey) return;
+            lastDependentsFetchKeyRef.current = fetchKey;
+            setLoadingDependents(true);
+            getDependentsByParentId(client.id, { includeArchived: !!client.archivedAt })
+                .then(setLocalDependents)
+                .catch((error) => {
+                    console.error('Error fetching dependents:', error);
+                })
+                .finally(() => setLoadingDependents(false));
+        }
+    }, [allClients, client.id, client.archivedAt]);
+
+    const status = statuses.find(s => s.id === (isEditing ? editForm.statusId : client.statusId));
+    const navigator = navigators.find(n => n.id === (isEditing ? editForm.navigatorId : client.navigatorId));
+
+    const hasGeocode = client.lat != null && client.lng != null && Number.isFinite(Number(client.lat)) && Number.isFinite(Number(client.lng));
+
+    const handleAutoGeocode = useCallback(async () => {
+        if (!client?.id || geoBusy) return;
+        const source = isEditing ? editForm : client;
+        const q = buildGeocodeQuery({
+            address: source.address || '',
+            city: source.city || '',
+            state: source.state || '',
+            zip: source.zip || '',
+        });
+        if (!q?.trim()) {
+            setGeoErr('Add address / city / state to geocode');
+            return;
+        }
+        setGeoBusy(true);
+        setGeoErr('');
+        try {
+            const a = await geocodeOneClient(q);
+            await updateClient(client.id, { lat: a.lat, lng: a.lng });
+            onClientUpdated?.(undefined);
+        } catch {
+            setGeoErr('Address not found');
+        } finally {
+            setGeoBusy(false);
+        }
+    }, [client?.id, isEditing, editForm.address, editForm.city, editForm.state, editForm.zip, geoBusy, onClientUpdated]);
+
+    const handleSave = async (): Promise<boolean> => {
+        setIsSaving(true);
+        try {
+            const beforeSnapshot = editStartSnapshotRef.current ?? getAuditSnapshotFromClient(client);
+            // Sidebar saves only client table fields; no order sync (avoids "Item not found" errors from draft data).
+            const updated = await updateClient(
+                client.id,
+                {
+                    fullName: editForm.fullName,
+                    dob: editForm.dob || null,
+                    statusId: editForm.statusId,
+                    navigatorId: editForm.navigatorId,
+                    phoneNumber: editForm.phoneNumber,
+                    secondaryPhoneNumber: editForm.secondaryPhoneNumber || null,
+                    email: editForm.email || null,
+                    address: editForm.address,
+                    apt: editForm.apt || null,
+                    city: editForm.city || null,
+                    state: editForm.state || null,
+                    zip: editForm.zip || null,
+                    county: editForm.county || null,
+                    dislikes: editForm.notes || null,
+                    caseIdExternal: editForm.caseIdExternal || null,
+                    authorizedAmount: editForm.authorizedAmount,
+                    voucherAmount: editForm.serviceType === 'Produce' ? (editForm.voucherAmount?.trim() || null) : null,
+                    expirationDate: editForm.expirationDate || null,
+                    approvedMealsPerWeek: editForm.approvedMealsPerWeek,
+                    serviceType: editForm.serviceType,
+                    produceVendorId: editForm.serviceType === 'Produce' ? editForm.produceVendorId : null,
+                    paused: editForm.paused,
+                    complex: editForm.complex,
+                    bill: editForm.bill,
+                    delivery: editForm.delivery,
+                    doNotText: editForm.doNotText,
+                    doNotTextReason: editForm.doNotText ? undefined : null,
+                    doNotTextNumbers: editForm.doNotTextNumbers,
+                    uniteAccount: editForm.uniteAccount || null,
+                    history: editForm.history || null,
+                },
+                { skipOrderSync: true }
+            );
+
+            const afterSnapshot = getAuditSnapshotFromEditForm(editForm);
+            const diffs = diffObjects(beforeSnapshot, afterSnapshot, {
+                ignorePathPrefixes: [],
+                maxDepth: 6,
+                maxEntries: 200,
+                nullishEqual: true,
+                emptyStringEqualNullish: true,
+            });
+            if (diffs.length > 0) {
+                const summary = formatAuditSummary(diffs);
+                const kind = inferChangeKindFromAuditDiffs(diffs);
+                void recordClientChange(client.id, summary, undefined, kind).catch((e) => {
+                    console.warn('[ClientInfoShelf] Failed to record client change:', e);
+                });
+            }
+
+            setIsEditing(false);
+            editStartSnapshotRef.current = null;
+            if (onClientUpdated) onClientUpdated(updated ?? undefined);
+            return true;
+        } catch (error) {
+            console.error('Failed to update client:', error);
+            alert('Failed to save changes. Please try again.');
+            return false;
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const handleSaveAndClose = async () => {
+        const ok = await handleSave();
+        if (ok) onClose();
+    };
+
+    const handleCancelEdit = () => {
+        if (isSaving) {
+            window.alert('Please wait until saving finishes before leaving edit mode.');
+            return;
+        }
+        if (hasUnsavedChanges) {
+            if (!window.confirm('Discard unsaved changes? Your edits will be lost.')) return;
+        }
+        setIsEditing(false);
+        setEditForm(getInitialEditForm(client));
+        editStartSnapshotRef.current = null;
+    };
+
+    const handleOverlayClick = async () => {
+        if (!isEditing) {
+            onClose();
+            return;
+        }
+        if (isSaving) {
+            window.alert('Saving is still in progress. Please wait before closing.');
+            return;
+        }
+        await handleSaveAndClose();
+    };
+
+    const handleRestore = async () => {
+        setRestoringClient(true);
+        try {
+            await unarchiveClient(client.id);
+            invalidateClientData(client.id);
+            invalidateClientData();
+            const refreshed = await getClient(client.id);
+            if (refreshed) onClientUpdated?.(refreshed);
+        } catch (e) {
+            console.error('Restore failed:', e);
+            alert(e instanceof Error ? e.message : 'Failed to restore client.');
+        } finally {
+            setRestoringClient(false);
+        }
+    };
+
+    const handleDelete = async () => {
+        if (confirm(`Are you sure you want to delete ${client.fullName}? This action cannot be undone.`)) {
+            try {
+                await deleteClient(client.id);
+                onClose();
+                if (onClientDeleted) onClientDeleted();
+            } catch (error) {
+                console.error('Failed to delete client:', error);
+                alert('Failed to delete client. Please try again.');
+            }
+        }
+    };
+
+    const handleCreateDependent = async () => {
+        if (!dependentName.trim() || !client.id) return;
+
+        setCreatingDependent(true);
+        try {
+            const newDep = await addDependent(
+                dependentName.trim(),
+                client.id,
+                dependentDob || null,
+                dependentCin ? Number(dependentCin) : null,
+                dependentServiceType,
+                dependentServiceType === 'Produce' ? dependentProduceVendorId : null
+            );
+            if (newDep) {
+                // Update local state
+                setLocalDependents(prev => [...prev, newDep]);
+                // Reset form
+                setDependentName('');
+                setDependentDob('');
+                setDependentCin('');
+                setDependentServiceType('Food');
+                setShowAddDependentForm(false);
+                // Notify parent
+                if (onClientUpdated) onClientUpdated(undefined);
+            }
+        } catch (error) {
+            console.error('Error creating dependent:', error);
+            alert(error instanceof Error ? error.message : 'Failed to create dependent');
+        } finally {
+            setCreatingDependent(false);
+        }
+    };
+
+    const handleDeleteDependent = async (dep: ClientProfile) => {
+        if (!confirm(`Delete dependent "${dep.fullName}"? This cannot be undone.`)) return;
+        setDeletingDependentId(dep.id);
+        try {
+            await deleteClient(dep.id);
+            setLocalDependents(prev => prev.filter(d => d.id !== dep.id));
+            if (onClientUpdated) onClientUpdated(undefined);
+        } catch (error) {
+            console.error('Error deleting dependent:', error);
+            alert(error instanceof Error ? error.message : 'Failed to delete dependent');
+        } finally {
+            setDeletingDependentId(null);
+        }
+    };
+
+    const handleRestoreDependent = async (dep: ClientProfile) => {
+        setRestoringDependentId(dep.id);
+        try {
+            await unarchiveClient(dep.id);
+            invalidateClientData(dep.id);
+            invalidateClientData(client.id);
+            invalidateClientData();
+            const refreshed = await getDependentsByParentId(client.id, { includeArchived: !!client.archivedAt });
+            setLocalDependents(refreshed);
+            if (onClientUpdated) onClientUpdated(undefined);
+        } catch (error) {
+            console.error('Error restoring dependent:', error);
+            alert(error instanceof Error ? error.message : 'Failed to restore dependent');
+        } finally {
+            setRestoringDependentId(null);
+        }
+    };
+
+    const handleOpenScreeningForm = async () => {
+        setLoadingForm(true);
+        try {
+            const response = await getSingleForm();
+            if (response.success && response.data) {
+                setFormSchema(response.data);
+                setIsFillingForm(true);
+            } else {
+                alert('No Screening Form configured.');
+            }
+        } catch (error) {
+            console.error('Failed to load form:', error);
+            alert('Failed to load form. Please try again.');
+        } finally {
+            setLoadingForm(false);
+        }
+    };
+
+    const handleCloseScreeningForm = () => {
+        setIsFillingForm(false);
+        setFormSchema(null);
+        if (onClientUpdated) onClientUpdated(undefined);
+    };
+
+    return (
+        <>
+            <div className={styles.shelfOverlay} onClick={() => void handleOverlayClick()} />
+            <div className={styles.shelf}>
+                <div className={styles.header}>
+                    <div className={styles.titleSection}>
+                        {isEditing ? (
+                            <input
+                                className={styles.editInput}
+                                value={editForm.fullName}
+                                onChange={e => setEditForm({ ...editForm, fullName: e.target.value })}
+                                autoFocus
+                            />
+                        ) : (
+                            <>
+                                <div className={styles.nameRow}>
+                                    <h2>{client.fullName}</h2>
+                                    {client.archivedAt ? <span className={styles.deletedBadge}>DELETED</span> : null}
+                                </div>
+                                {client.createdAt ? (
+                                    <div style={{ fontSize: '0.875rem', color: 'var(--text-tertiary)', marginTop: '-4px' }}>
+                                        Created {formatDateTimeInAppTz(client.createdAt)}
+                                    </div>
+                                ) : null}
+                                <Link
+                                    href={`/client-portal/${client.id}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className={styles.portalLink}
+                                    title="Open client portal"
+                                >
+                                    {client.id}
+                                </Link>
+                            </>
+                        )}
+                    </div>
+                    <div className={styles.headerActions}>
+                        {isEditing ? (
+                            <>
+                                <button className={styles.saveBtn} onClick={handleSave} disabled={isSaving}>
+                                    {isSaving ? <Loader2 className="animate-spin" size={18} /> : <Check size={18} />}
+                                </button>
+                                <button className={styles.cancelBtn} onClick={handleCancelEdit}>
+                                    <X size={18} />
+                                </button>
+                            </>
+                        ) : (
+                            <>
+                                {!client.archivedAt && (
+                                    <button className={styles.editBtn} onClick={beginEdit}>
+                                        <Pencil size={18} />
+                                    </button>
+                                )}
+                                {client.archivedAt && (
+                                    <button
+                                        type="button"
+                                        className={`${styles.editBtn} ${styles.restoreBtn}`}
+                                        onClick={() => void handleRestore()}
+                                        disabled={restoringClient}
+                                        title="Restore to active client list"
+                                        aria-label="Restore client"
+                                        style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.8125rem', fontWeight: 600 }}
+                                    >
+                                        {restoringClient ? <Loader2 className="animate-spin" size={16} /> : <RotateCcw size={16} />}
+                                        <span>Restore</span>
+                                    </button>
+                                )}
+                                {!client.archivedAt && (
+                                    <button className={styles.deleteBtn} onClick={handleDelete}>
+                                        <Trash2 size={18} />
+                                    </button>
+                                )}
+                                <button className={styles.closeBtn} onClick={onClose}>
+                                    <X size={24} />
+                                </button>
+                            </>
+                        )}
+                    </div>
+                </div>
+
+                {isFillingForm && formSchema && (
+                    <div style={{
+                        position: 'fixed',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        backgroundColor: 'white',
+                        zIndex: 10000,
+                        padding: '2rem',
+                        overflowY: 'auto'
+                    }}>
+                        <FormFiller
+                            schema={formSchema}
+                            onBack={handleCloseScreeningForm}
+                            clientId={client.id}
+                        />
+                    </div>
+                )}
+
+                <div className={styles.content}>
+                    {/* Contact & Address - first so it's visible when panel opens; no Status/Navigator here (only in Service Information with dropdown) */}
+                    <div className={styles.section}>
+                        <h3>Contact & Address</h3>
+                        <div className={styles.infoGrid}>
+                            <div className={styles.infoItem + ' ' + styles.fullWidth}>
+                                <div className={styles.label}>Address</div>
+                                <div className={styles.value}>
+                                    {isEditing ? (
+                                        <input
+                                            className={styles.editInput}
+                                            value={editForm.address}
+                                            onChange={e => setEditForm({ ...editForm, address: e.target.value })}
+                                            placeholder="Street address"
+                                        />
+                                    ) : (
+                                        (client.address?.trim() || client.apt?.trim())
+                                            ? `${client.address?.trim() || ''}${client.apt?.trim() ? (client.address?.trim() ? `, Unit: ${client.apt.trim()}` : `Unit: ${client.apt.trim()}`) : ''}`
+                                            : '—'
+                                    )}
+                                </div>
+                            </div>
+                            <div className={styles.infoItem + ' ' + styles.fullWidth}>
+                                <div className={styles.label}>Unit</div>
+                                <div className={styles.value}>
+                                    {isEditing ? (
+                                        <input
+                                            className={styles.editInput}
+                                            value={editForm.apt}
+                                            onChange={e => setEditForm({ ...editForm, apt: e.target.value })}
+                                            placeholder="Apt / Unit"
+                                        />
+                                    ) : (
+                                        client.apt?.trim() || '—'
+                                    )}
+                                </div>
+                            </div>
+                            <div className={styles.infoItem}>
+                                <div className={styles.label}>City</div>
+                                <div className={styles.value}>
+                                    {isEditing ? (
+                                        <input
+                                            className={styles.editInput}
+                                            value={editForm.city}
+                                            onChange={e => setEditForm({ ...editForm, city: e.target.value })}
+                                            placeholder="City"
+                                        />
+                                    ) : (
+                                        client.city?.trim() || '—'
+                                    )}
+                                </div>
+                            </div>
+                            <div className={styles.infoItem}>
+                                <div className={styles.label}>State</div>
+                                <div className={styles.value}>
+                                    {isEditing ? (
+                                        <input
+                                            className={styles.editInput}
+                                            value={editForm.state}
+                                            onChange={e => setEditForm({ ...editForm, state: e.target.value })}
+                                            placeholder="State"
+                                        />
+                                    ) : (
+                                        client.state?.trim() || '—'
+                                    )}
+                                </div>
+                            </div>
+                            <div className={styles.infoItem}>
+                                <div className={styles.label}>Zip</div>
+                                <div className={styles.value}>
+                                    {isEditing ? (
+                                        <input
+                                            className={styles.editInput}
+                                            value={editForm.zip}
+                                            onChange={e => setEditForm({ ...editForm, zip: e.target.value })}
+                                            placeholder="Zip"
+                                        />
+                                    ) : (
+                                        client.zip?.trim() || '—'
+                                    )}
+                                </div>
+                            </div>
+                            <div className={styles.infoItem + ' ' + styles.fullWidth}>
+                                <div className={styles.label}>County</div>
+                                <div className={styles.value}>
+                                    {isEditing ? (
+                                        <input
+                                            className={styles.editInput}
+                                            value={editForm.county}
+                                            onChange={e => setEditForm({ ...editForm, county: e.target.value })}
+                                            placeholder="County"
+                                        />
+                                    ) : (
+                                        client.county?.trim() || '—'
+                                    )}
+                                </div>
+                            </div>
+                            <div className={styles.infoItem}>
+                                <div className={styles.label}>Phone</div>
+                                <div className={styles.value}>
+                                    {isEditing ? (
+                                        <input
+                                            className={styles.editInput}
+                                            value={editForm.phoneNumber}
+                                            onChange={e => setEditForm({ ...editForm, phoneNumber: e.target.value })}
+                                            placeholder="Primary"
+                                        />
+                                    ) : (
+                                        client.phoneNumber?.trim() ? (
+                                            <a href={`tel:${client.phoneNumber.replace(/\s/g, '')}`}>{client.phoneNumber}</a>
+                                        ) : '—'
+                                    )}
+                                </div>
+                            </div>
+                            <div className={styles.infoItem}>
+                                <div className={styles.label}>Secondary Phone</div>
+                                <div className={styles.value}>
+                                    {isEditing ? (
+                                        <input
+                                            className={styles.editInput}
+                                            value={editForm.secondaryPhoneNumber}
+                                            onChange={e => setEditForm({ ...editForm, secondaryPhoneNumber: e.target.value })}
+                                            placeholder="Secondary"
+                                        />
+                                    ) : (
+                                        client.secondaryPhoneNumber?.trim() ? (
+                                            <a href={`tel:${client.secondaryPhoneNumber.replace(/\s/g, '')}`}>{client.secondaryPhoneNumber}</a>
+                                        ) : '—'
+                                    )}
+                                </div>
+                            </div>
+                            <div className={styles.infoItem + ' ' + styles.fullWidth}>
+                                <div className={styles.label}>Email</div>
+                                <div className={styles.value}>
+                                    {isEditing ? (
+                                        <input
+                                            className={styles.editInput}
+                                            value={editForm.email}
+                                            onChange={e => setEditForm({ ...editForm, email: e.target.value })}
+                                            placeholder="Email"
+                                        />
+                                    ) : (
+                                        client.email?.trim() ? (
+                                            <a href={`mailto:${client.email}`}>{client.email}</a>
+                                        ) : '—'
+                                    )}
+                                </div>
+                            </div>
+                            <div className={styles.infoItem}>
+                                <div className={styles.label}>Date of Birth</div>
+                                <div className={styles.value}>
+                                    {isEditing ? (
+                                        <input
+                                            type="date"
+                                            className={styles.editInput}
+                                            value={editForm.dob ? editForm.dob.split('T')[0] : ''}
+                                            onChange={e => setEditForm({ ...editForm, dob: e.target.value })}
+                                        />
+                                    ) : (
+                                        client.dob ? new Date(client.dob).toLocaleDateString() : '—'
+                                    )}
+                                </div>
+                            </div>
+                            <div className={styles.infoItem + ' ' + styles.fullWidth}>
+                                <div className={styles.label}>Notes</div>
+                                <div className={styles.value}>
+                                    {isEditing ? (
+                                        <textarea
+                                            className={styles.editTextarea}
+                                            value={editForm.notes}
+                                            onChange={e => setEditForm({ ...editForm, notes: e.target.value })}
+                                            rows={3}
+                                            placeholder="Notes, dietary restrictions, or other info"
+                                        />
+                                    ) : (
+                                        <span style={{ whiteSpace: 'pre-wrap' }}>{client.dislikes?.trim() || '—'}</span>
+                                    )}
+                                </div>
+                            </div>
+                            <div className={styles.infoItem + ' ' + styles.fullWidth}>
+                                <div className={styles.label}>Flags</div>
+                                <div className={styles.value}>
+                                    {isEditing ? (
+                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+                                            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={editForm.paused}
+                                                    onChange={e => setEditForm({ ...editForm, paused: e.target.checked })}
+                                                />
+                                                <span>Paused</span>
+                                            </label>
+                                            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={editForm.complex}
+                                                    onChange={e => setEditForm({ ...editForm, complex: e.target.checked })}
+                                                />
+                                                <span>Complex</span>
+                                            </label>
+                                            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={editForm.bill}
+                                                    onChange={e => setEditForm({ ...editForm, bill: e.target.checked })}
+                                                />
+                                                <span>Bill</span>
+                                            </label>
+                                            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={editForm.delivery}
+                                                    onChange={e => setEditForm({ ...editForm, delivery: e.target.checked })}
+                                                />
+                                                <span>Delivery</span>
+                                            </label>
+                                            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={editForm.doNotText}
+                                                    onChange={e => setEditForm({ ...editForm, doNotText: e.target.checked, doNotTextNumbers: e.target.checked ? editForm.doNotTextNumbers : {} })}
+                                                />
+                                                <span>Do Not Text (all)</span>
+                                            </label>
+                                            {(() => {
+                                                const nums = getAllClientNumbers(client);
+                                                if (nums.length === 0) return null;
+                                                const map = editForm.doNotTextNumbers || {};
+                                                return nums.map(raw => {
+                                                    const e164 = normalizePhone(raw);
+                                                    if (!e164) return null;
+                                                    const flagged = !!map[e164];
+                                                    return (
+                                                        <label key={e164} style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', fontSize: '0.85rem', color: '#991b1b' }}>
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={flagged}
+                                                                onChange={e => {
+                                                                    const next = { ...map };
+                                                                    if (e.target.checked) {
+                                                                        next[e164] = 'Manually flagged';
+                                                                    } else {
+                                                                        delete next[e164];
+                                                                    }
+                                                                    const allNums = getAllClientNumbers(client);
+                                                                    const allFlagged = allNums.every(r => { const n = normalizePhone(r); return !n || !!next[n]; });
+                                                                    setEditForm({ ...editForm, doNotTextNumbers: next, doNotText: allFlagged });
+                                                                }}
+                                                            />
+                                                            <span>No text: {raw}</span>
+                                                        </label>
+                                                    );
+                                                });
+                                            })()}
+                                        </div>
+                                    ) : (
+                                        (client.paused || client.complex || client.bill || client.delivery || client.doNotText) ? (
+                                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                                                {client.paused && <span className={styles.flagChip}>Paused</span>}
+                                                {client.complex && <span className={styles.flagChip}>Complex</span>}
+                                                {client.bill && <span className={styles.flagChip}>Bill</span>}
+                                                {client.delivery && <span className={styles.flagChip}>Delivery</span>}
+                                                {client.doNotText && <span className={styles.flagChip} style={{ backgroundColor: '#fee2e2', color: '#991b1b' }}>Do Not Text</span>}
+                                            </div>
+                                        ) : '—'
+                                    )}
+                                    {!isEditing && client.doNotTextNumbers && Object.keys(client.doNotTextNumbers).length > 0 && (
+                                        <div style={{ fontSize: '0.75rem', color: '#991b1b', marginTop: '4px' }}>
+                                            {Object.entries(client.doNotTextNumbers).map(([num, reason]) => (
+                                                <div key={num}>{num}: {reason}</div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            <div className={styles.infoItem + ' ' + styles.fullWidth}>
+                                <div className={styles.label}>Geocode</div>
+                                <div className={styles.value}>
+                                    <span style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                        {hasGeocode && (
+                                            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                                                ✓ {Number(client.lat).toFixed(4)}, {Number(client.lng).toFixed(4)}
+                                            </span>
+                                        )}
+                                        {(isEditing || !hasGeocode) && (
+                                            <>
+                                                <button
+                                                    type="button"
+                                                    className="btn btn-secondary btn-sm"
+                                                    onClick={handleAutoGeocode}
+                                                    disabled={geoBusy}
+                                                    style={{ alignSelf: 'flex-start' }}
+                                                >
+                                                    {geoBusy ? <Loader2 size={14} className="animate-spin" /> : <MapPinned size={14} />}
+                                                    {' '}{geoBusy ? 'Geocoding…' : 'Auto Geocode'}
+                                                </button>
+                                                {geoErr && <span style={{ fontSize: '0.8rem', color: 'var(--color-danger, #dc2626)' }}>{geoErr}</span>}
+                                            </>
+                                        )}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className={styles.section}>
+
+                        <div className={styles.infoGrid}>
+                            <div className={styles.infoItem}>
+                                <div className={styles.label}>Navigator</div>
+                                <div className={styles.value}>
+                                    {isEditing ? (
+                                        <select
+                                            className={styles.editSelect}
+                                            value={editForm.navigatorId}
+                                            onChange={e => setEditForm({ ...editForm, navigatorId: e.target.value })}
+                                        >
+                                            <option value="">Select Navigator</option>
+                                            {navigators.map(n => <option key={n.id} value={n.id}>{n.name}</option>)}
+                                        </select>
+                                    ) : (
+                                        navigator?.name || 'Unassigned'
+                                    )}
+                                </div>
+                            </div>
+                            <div className={styles.infoItem}>
+                                <div className={styles.label}>Status</div>
+                                <div className={styles.value}>
+                                    {isEditing ? (
+                                        <select
+                                            className={styles.editSelect}
+                                            value={editForm.statusId}
+                                            onChange={e => setEditForm({ ...editForm, statusId: e.target.value })}
+                                        >
+                                            <option value="">Select Status</option>
+                                            {statuses.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                                        </select>
+                                    ) : (
+                                        status?.name || 'Unknown'
+                                    )}
+                                </div>
+                            </div>
+                            <div className={styles.infoItem}>
+                                <div className={styles.label}>Service Type</div>
+                                <div className={styles.value}>
+                                    {isEditing ? (
+                                        <select
+                                            className={styles.editSelect}
+                                            value={editForm.serviceType === 'Produce' ? `Produce:${editForm.produceVendorId || ''}` : editForm.serviceType}
+                                            onChange={e => {
+                                                const val = e.target.value;
+                                                if (val.startsWith('Produce:')) {
+                                                    const pvId = val.slice('Produce:'.length) || null;
+                                                    setEditForm({ ...editForm, serviceType: 'Produce' as any, produceVendorId: pvId });
+                                                } else {
+                                                    setEditForm({ ...editForm, serviceType: val as any, produceVendorId: null });
+                                                }
+                                            }}
+                                        >
+                                            <option value="Food">Food</option>
+                                            <option value="Produce:">Produce (unassigned)</option>
+                                            {produceVendors.filter(pv => pv.isActive).map(pv => (
+                                                <option key={pv.id} value={`Produce:${pv.id}`}>Produce - {pv.name}</option>
+                                            ))}
+                                        </select>
+                                    ) : (
+                                        client.serviceType === 'Produce'
+                                            ? `Produce${(() => { const pv = produceVendors.find(v => v.id === client.produceVendorId); return pv ? ` - ${pv.name}` : ''; })()}`
+                                            : (client.serviceType || '-')
+                                    )}
+                                </div>
+                            </div>
+                            <div className={styles.infoItem + ' ' + styles.fullWidth}>
+                                <div className={styles.label}>Unite Us</div>
+                                <div className={styles.value}>
+                                    {isEditing ? (
+                                        <input
+                                            className={styles.editInput}
+                                            value={editForm.caseIdExternal}
+                                            onChange={e => setEditForm({ ...editForm, caseIdExternal: e.target.value })}
+                                            placeholder="https://app.uniteus.io/dashboard/cases/open/..."
+                                        />
+                                    ) : client.caseIdExternal?.trim() ? (
+                                        <a
+                                            href={client.caseIdExternal.startsWith('http') ? client.caseIdExternal : `https://${client.caseIdExternal}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                        >
+                                            Open in Unite Us <ExternalLink size={14} />
+                                        </a>
+                                    ) : (
+                                        '—'
+                                    )}
+                                </div>
+                            </div>
+                            <div className={styles.infoItem}>
+                                <div className={styles.label}>Unite Account</div>
+                                <div className={styles.value}>
+                                    {isEditing ? (
+                                        <select
+                                            className={styles.editSelect}
+                                            value={editForm.uniteAccount}
+                                            onChange={e => setEditForm({ ...editForm, uniteAccount: e.target.value })}
+                                        >
+                                            {UNITE_ACCOUNT_UI_OPTIONS.map((opt) => (
+                                                <option key={opt.value} value={opt.value}>
+                                                    {opt.label}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    ) : (
+                                        client.uniteAccount?.trim() || '—'
+                                    )}
+                                </div>
+                            </div>
+                            <div className={styles.infoItem + ' ' + styles.fullWidth}>
+                                <div className={styles.label}>History</div>
+                                <div className={styles.value}>
+                                    {isEditing ? (
+                                        <textarea
+                                            className={styles.editTextarea}
+                                            value={editForm.history}
+                                            onChange={e => setEditForm({ ...editForm, history: e.target.value })}
+                                            rows={3}
+                                            placeholder="History / notes"
+                                        />
+                                    ) : (
+                                        <span style={{ whiteSpace: 'pre-wrap' }}>{client.history?.trim() || '—'}</span>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className={styles.section}>
+                        <h3>Financials & Eligibility</h3>
+                        <div className={styles.infoGrid}>
+                            <div className={styles.infoItem}>
+                                <div className={styles.label}>Authorized Amount ($)</div>
+                                <div className={styles.value}>
+                                    {isEditing ? (
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                            <span style={{ color: 'var(--text-secondary)' }}>$</span>
+                                            <input
+                                                type="number"
+                                                className={styles.editInput}
+                                                value={editForm.authorizedAmount}
+                                                onChange={e => setEditForm({ ...editForm, authorizedAmount: parseFloat(e.target.value) || 0 })}
+                                            />
+                                        </div>
+                                    ) : (
+                                        client.authorizedAmount !== null && client.authorizedAmount !== undefined
+                                            ? `$${client.authorizedAmount.toFixed(2)}`
+                                            : '-'
+                                    )}
+                                </div>
+                            </div>
+                            <div className={styles.infoItem}>
+                                <div className={styles.label}>Expiration Date</div>
+                                <div className={styles.value}>
+                                    {isEditing ? (
+                                        <input
+                                            type="date"
+                                            className={styles.editInput}
+                                            value={editForm.expirationDate ? editForm.expirationDate.split('T')[0] : ''}
+                                            onChange={e => setEditForm({ ...editForm, expirationDate: e.target.value })}
+                                        />
+                                    ) : (
+                                        client.expirationDate
+                                            ? new Date(client.expirationDate).toLocaleDateString()
+                                            : '-'
+                                    )}
+                                </div>
+                            </div>
+                            {(isEditing ? editForm.serviceType : client.serviceType) === 'Produce' && (
+                                <div className={styles.infoItem + ' ' + styles.fullWidth}>
+                                    <div className={styles.label}>Voucher amount</div>
+                                    <div className={styles.value}>
+                                        {isEditing ? (
+                                            <input
+                                                type="text"
+                                                className={styles.editInput}
+                                                value={editForm.voucherAmount}
+                                                onChange={e => setEditForm({ ...editForm, voucherAmount: e.target.value })}
+                                                placeholder="e.g. amount or reference"
+                                            />
+                                        ) : (
+                                            <span style={{ whiteSpace: 'pre-wrap' }}>{client.voucherAmount?.trim() || '—'}</span>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+                            <div className={styles.infoItem + ' ' + styles.fullWidth}>
+                                <div className={styles.label}>
+                                    {client.serviceType === 'Boxes' ? 'Approved Boxes/Cycle' : 'Approved Meals/Week'}
+                                </div>
+                                <div className={styles.value}>
+                                    {isEditing ? (
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                            <input
+                                                type="number"
+                                                className={styles.editInput}
+                                                value={client.serviceType === 'Boxes' ? editForm.authorizedAmount : editForm.approvedMealsPerWeek}
+                                                onChange={e => {
+                                                    const val = parseInt(e.target.value) || 0;
+                                                    if (client.serviceType === 'Boxes') {
+                                                        setEditForm({
+                                                            ...editForm,
+                                                            approvedMealsPerWeek: val,
+                                                            authorizedAmount: val
+                                                        });
+                                                    } else {
+                                                        setEditForm({ ...editForm, approvedMealsPerWeek: val });
+                                                    }
+                                                }}
+                                            />
+                                            <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                                                {client.serviceType === 'Boxes' ? 'Boxes/Cycle' : 'Meals/Week'}
+                                            </span>
+                                        </div>
+                                    ) : (
+                                        client.serviceType === 'Boxes'
+                                            ? `${client.authorizedAmount || 0} Boxes/Cycle`
+                                            : `${client.approvedMealsPerWeek || 0} Meals/Week`
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Dependents Section */}
+                    {!client.parentClientId && (
+                        <div className={styles.section}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                                <h3>Dependents</h3>
+                                <button
+                                    className="btn btn-secondary btn-sm"
+                                    onClick={() => setShowAddDependentForm(!showAddDependentForm)}
+                                    style={{ fontSize: '0.75rem' }}
+                                >
+                                    <Plus size={14} style={{ marginRight: '4px' }} />
+                                    {showAddDependentForm ? 'Cancel' : 'Add Dependent'}
+                                </button>
+                            </div>
+
+                            {showAddDependentForm && (
+                                <div style={{
+                                    padding: '12px',
+                                    border: '1px solid var(--border-color)',
+                                    borderRadius: 'var(--radius-md)',
+                                    backgroundColor: 'var(--bg-surface-hover)',
+                                    marginBottom: '12px'
+                                }}>
+                                    <div className={styles.formGroup} style={{ marginBottom: '8px' }}>
+                                        <label className="label" style={{ fontSize: '0.75rem' }}>Name</label>
+                                        <input
+                                            className="input input-sm"
+                                            value={dependentName}
+                                            onChange={e => setDependentName(e.target.value)}
+                                            placeholder="Dependent Name"
+                                            autoFocus
+                                        />
+                                    </div>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '12px' }}>
+                                        <div className={styles.formGroup} style={{ marginBottom: 0 }}>
+                                            <label className="label" style={{ fontSize: '0.75rem' }}>DOB</label>
+                                            <input
+                                                type="date"
+                                                className="input input-sm"
+                                                value={dependentDob}
+                                                onChange={e => setDependentDob(e.target.value)}
+                                            />
+                                        </div>
+                                        <div className={styles.formGroup} style={{ marginBottom: 0 }}>
+                                            <label className="label" style={{ fontSize: '0.75rem' }}>CIN#</label>
+                                            <input
+                                                className="input input-sm"
+                                                value={dependentCin}
+                                                onChange={e => setDependentCin(e.target.value)}
+                                                placeholder="CIN"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className={styles.formGroup} style={{ marginBottom: '12px' }}>
+                                        <label className="label" style={{ fontSize: '0.75rem' }}>Type</label>
+                                        <select
+                                            className="input input-sm"
+                                            value={dependentServiceType === 'Produce' ? `Produce:${dependentProduceVendorId || ''}` : 'Food'}
+                                            onChange={e => {
+                                                const val = e.target.value;
+                                                if (val.startsWith('Produce:')) {
+                                                    setDependentServiceType('Produce');
+                                                    setDependentProduceVendorId(val.slice('Produce:'.length) || null);
+                                                } else {
+                                                    setDependentServiceType('Food');
+                                                    setDependentProduceVendorId(null);
+                                                }
+                                            }}
+                                        >
+                                            <option value="Food">Food</option>
+                                            <option value="Produce:">Produce (unassigned)</option>
+                                            {produceVendors.filter(pv => pv.isActive).map(pv => (
+                                                <option key={pv.id} value={`Produce:${pv.id}`}>Produce - {pv.name}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                                        <button
+                                            className="btn btn-secondary btn-sm"
+                                            onClick={() => {
+                                                setShowAddDependentForm(false);
+                                                setDependentServiceType('Food');
+                                                setDependentProduceVendorId(null);
+                                            }}
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            className="btn btn-primary btn-sm"
+                                            disabled={!dependentName.trim() || creatingDependent}
+                                            onClick={handleCreateDependent}
+                                        >
+                                            {creatingDependent ? <Loader2 className="animate-spin" size={14} /> : 'Create'}
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {loadingDependents ? (
+                                <div className={styles.emptyText} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <Loader2 size={16} className="animate-spin" />
+                                    Loading dependants…
+                                </div>
+                            ) : localDependents.length === 0 ? (
+                                <div className={styles.emptyText}>No dependants</div>
+                            ) : (
+                                <div className={styles.dependentsList}>
+                                    {localDependents.map(dep => (
+                                        <div
+                                            key={dep.id}
+                                            className={styles.dependentCard}
+                                            onClick={() => onOpenDependantShelf ? onOpenDependantShelf(dep.id) : onOpenProfile(dep.id)}
+                                            style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                                        >
+                                            <div style={{ flex: 1, minWidth: 0 }}>
+                                                <div className={styles.depName} style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                                    <span>{dep.fullName}</span>
+                                                    {dep.archivedAt ? <span className={styles.deletedBadge}>DELETED</span> : null}
+                                                </div>
+                                                <div className={styles.depInfo}>
+                                                    {dep.dob && <span>DOB: {new Date(dep.dob).toLocaleDateString()}</span>}
+                                                    {dep.cin && <span> | CIN: {dep.cin}</span>}
+                                                </div>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                className="btn btn-secondary btn-sm"
+                                                style={{ flexShrink: 0, padding: '4px 8px' }}
+                                                title={onOpenDependantShelf ? 'Open dependent sidebar' : 'Edit dependent'}
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    onOpenDependantShelf ? onOpenDependantShelf(dep.id) : onOpenProfile(dep.id);
+                                                }}
+                                                aria-label={onOpenDependantShelf ? `Open ${dep.fullName} sidebar` : `Edit ${dep.fullName}`}
+                                            >
+                                                <Pencil size={14} />
+                                            </button>
+                                            {dep.archivedAt ? (
+                                                <button
+                                                    type="button"
+                                                    className={`btn btn-secondary btn-sm ${styles.restoreBtn}`}
+                                                    style={{ flexShrink: 0, padding: '4px 8px', display: 'flex', alignItems: 'center', gap: 4, fontWeight: 600, fontSize: '0.75rem' }}
+                                                    title="Restore dependent"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        void handleRestoreDependent(dep);
+                                                    }}
+                                                    disabled={restoringDependentId === dep.id}
+                                                    aria-label={`Restore ${dep.fullName}`}
+                                                >
+                                                    {restoringDependentId === dep.id ? (
+                                                        <Loader2 size={14} className="animate-spin" />
+                                                    ) : (
+                                                        <RotateCcw size={14} />
+                                                    )}
+                                                    <span>Restore</span>
+                                                </button>
+                                            ) : (
+                                                <button
+                                                    type="button"
+                                                    className="btn btn-secondary btn-sm"
+                                                    style={{ flexShrink: 0, padding: '4px 8px' }}
+                                                    title="Delete dependent"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleDeleteDependent(dep);
+                                                    }}
+                                                    disabled={deletingDependentId === dep.id}
+                                                    aria-label={`Delete ${dep.fullName}`}
+                                                >
+                                                    {deletingDependentId === dep.id ? (
+                                                        <Loader2 size={14} className="animate-spin" />
+                                                    ) : (
+                                                        <Trash2 size={14} />
+                                                    )}
+                                                </button>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Screening Submissions Section */}
+                    <div className={styles.section}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                            <div>
+                                <h3 style={{ marginBottom: '2px' }}>Screening Form Submissions</h3>
+                                <div style={{
+                                    fontSize: '0.75rem',
+                                    fontWeight: 500,
+                                    color: (() => {
+                                        const status = client?.screeningStatus || 'not_started';
+                                        switch (status) {
+                                            case 'waiting_approval': return '#48be85';
+                                            case 'approved': return 'var(--color-success)';
+                                            case 'rejected': return 'var(--color-danger)';
+                                            default: return 'var(--text-tertiary)';
+                                        }
+                                    })()
+                                }}>
+                                    Status: {(() => {
+                                        const status = client?.screeningStatus || 'not_started';
+                                        switch (status) {
+                                            case 'not_started': return 'Not Started';
+                                            case 'waiting_approval': return 'Pending Approval';
+                                            case 'approved': return 'Approved';
+                                            case 'rejected': return 'Rejected';
+                                            default: return 'Not Started';
+                                        }
+                                    })()}
+                                </div>
+                            </div>
+                            <button
+                                className="btn btn-primary btn-sm"
+                                onClick={handleOpenScreeningForm}
+                                disabled={loadingForm}
+                                style={{ fontSize: '0.75rem' }}
+                            >
+                                {loadingForm ? (
+                                    <Loader2 className="animate-spin" size={14} />
+                                ) : (
+                                    <>
+                                        <FileText size={14} style={{ marginRight: '4px' }} />
+                                        New Form
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                        <div className={styles.submissionsList}>
+                            {submissions.length === 0 ? (
+                                <div className={styles.emptyText}>No submissions yet</div>
+                            ) : (
+                                submissions.map((sub) => (
+                                    <div key={sub.id} className={styles.submissionCard} style={{ borderLeftColor: getStatusColor(sub.status) }}>
+                                        <div className={styles.subHeader}>
+                                            <div className={styles.subMeta}>
+                                                {sub.status === 'accepted' && <CheckCircle size={16} color="#10b981" />}
+                                                {sub.status === 'rejected' && <XCircle size={16} color="#ef4444" />}
+                                                {sub.status === 'pending' && <Clock size={16} color="#f59e0b" />}
+                                                <span className={styles.subDate}>{new Date(sub.created_at).toLocaleDateString()}</span>
+                                            </div>
+                                            <div style={{ display: 'flex', gap: '6px' }}>
+                                                {(sub.status === 'pending' || sub.status === 'accepted') && sub.token && (
+                                                    <a
+                                                        href={`/verify-order/${sub.token}`}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className={styles.downloadBtn}
+                                                        title={sub.status === 'pending' ? 'Open approval page (same link sent to nutritionist)' : 'Open approval page'}
+                                                        style={{ textDecoration: 'none' }}
+                                                    >
+                                                        <ExternalLink size={14} /> Open
+                                                    </a>
+                                                )}
+                                                {sub.status === 'accepted' && sub.pdf_url && (
+                                                    <button
+                                                        className={styles.downloadBtn}
+                                                        onClick={() => {
+                                                            const r2Domain = process.env.NEXT_PUBLIC_R2_DOMAIN;
+                                                            if (!r2Domain) return;
+                                                            const url = r2Domain.startsWith('http')
+                                                                ? `${r2Domain}/${sub.pdf_url}`
+                                                                : `https://${r2Domain}/${sub.pdf_url}`;
+                                                            window.open(url, '_blank');
+                                                        }}
+                                                    >
+                                                        <Download size={14} /> PDF
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+
+                    <div className={styles.section}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: showChangeLog ? 12 : 0 }}>
+                            <h3 style={{ marginBottom: 0 }}>Changes</h3>
+                            <button
+                                type="button"
+                                onClick={toggleChangeLog}
+                                style={{
+                                    background: 'transparent',
+                                    border: 'none',
+                                    padding: 0,
+                                    color: 'var(--text-tertiary)',
+                                    fontSize: '0.85rem',
+                                    textDecoration: 'underline',
+                                    cursor: 'pointer',
+                                }}
+                            >
+                                {showChangeLog ? 'Hide changes' : 'View changes'}
+                            </button>
+                        </div>
+
+                        {showChangeLog && (
+                            <>
+                                {changeLogLoading ? (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-tertiary)' }}>
+                                        <Loader2 className="animate-spin" size={16} />
+                                        Loading…
+                                    </div>
+                                ) : changeLogError ? (
+                                    <div style={{ color: 'var(--text-tertiary)', fontSize: '0.95rem' }}>
+                                        {changeLogError}
+                                    </div>
+                                ) : (changeLogEntries && changeLogEntries.length === 0) ? (
+                                    <div style={{ color: 'var(--text-tertiary)', fontSize: '0.95rem' }}>
+                                        No changes recorded yet.
+                                    </div>
+                                ) : (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                        {(changeLogEntries || []).map((e) => (
+                                            <div key={e.id} style={{ border: '1px solid var(--border-subtle)', borderRadius: 10, padding: 10 }}>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, color: 'var(--text-tertiary)', fontSize: '0.85rem' }}>
+                                                    <div>{e.who}</div>
+                                                    <div>{formatDateTimeInAppTz(e.timestamp)}</div>
+                                                </div>
+                                                <div style={{ marginTop: 6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                                                    {e.summary}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </>
+                        )}
+                    </div>
+                </div>
+
+                <div className={styles.footer}>
+                    <Link
+                        href={`/admin/client-portal/${client.id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={styles.actionBtn}
+                        style={{ textDecoration: 'none' }}
+                    >
+                        Open Order Details
+                        <ExternalLink size={18} />
+                    </Link>
+                </div>
+            </div>
+        </>
+    );
+}
+
+function getStatusColor(status: string) {
+    switch (status) {
+        case 'accepted': return '#10b981';
+        case 'rejected': return '#ef4444';
+        case 'pending': return '#f59e0b';
+        default: return '#6b7280';
+    }
+}

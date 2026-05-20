@@ -1,0 +1,1824 @@
+'use client';
+
+import { useState, useEffect, useMemo, useCallback, type WheelEvent } from 'react';
+import { Vendor, MenuItem, OrderConfiguration, BoxType, BoxConfiguration, ItemCategory } from '@/lib/types';
+import { getDefaultOrderTemplate, saveDefaultOrderTemplate, getMealPlannerCustomItems, saveMealPlannerCustomItems, getMealPlannerItemCountsByDate, addMenuItem, updateMenuItem, deleteMenuItem, updateMenuItemOrder } from '@/lib/actions';
+import { clearDefaultOrderTemplateCache } from '@/lib/default-order-template-cache';
+import { getTodayInAppTz, getDatePartsInAppTz, getCalendarDaysForMonthInAppTz } from '@/lib/timezone';
+import { Save, Loader2, Plus, Trash2, Package, ChevronLeft, ChevronRight, X, Check, GripVertical, Edit2 } from 'lucide-react';
+import {
+    DndContext,
+    closestCenter,
+    PointerSensor,
+    useSensor,
+    useSensors,
+    DragEndEvent
+} from '@dnd-kit/core';
+import {
+    arrayMove,
+    SortableContext,
+    verticalListSortingStrategy,
+    useSortable
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import styles from './DefaultOrderTemplate.module.css';
+import { useDataCache } from '@/lib/data-cache';
+
+type MealPlannerCustomItem = { id: string; name: string; quantity: number; value?: number | null; sortOrder?: number };
+
+function totalQtyFromMealPlannerDraft(items: MealPlannerCustomItem[]): number {
+    return items.reduce((sum, i) => sum + Math.max(0, Number(i.quantity) || 0), 0);
+}
+
+/** Wheel / trackpad scroll must not nudge number values (common while reordering rows). */
+function preventNumberInputWheelNudge(e: WheelEvent<HTMLInputElement>) {
+    e.preventDefault();
+}
+
+interface SortableMealPlannerRowProps {
+    item: MealPlannerCustomItem;
+    onUpdate: (id: string, patch: Partial<Pick<MealPlannerCustomItem, 'name' | 'quantity' | 'value' | 'sortOrder'>>) => void;
+    onRemove: (id: string) => void;
+    disabled?: boolean;
+}
+
+function SortableMealPlannerRow({ item, onUpdate, onRemove, disabled = false }: SortableMealPlannerRowProps) {
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id, disabled });
+    const style = {
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.6 : 1,
+    };
+    return (
+        <div ref={setNodeRef} className={styles.popupCustomItemRow} style={style}>
+            <div
+                {...attributes}
+                {...listeners}
+                className={styles.mealPlannerDragHandle}
+                aria-label="Drag to reorder"
+                style={{ cursor: disabled ? 'not-allowed' : 'grab', opacity: disabled ? 0.5 : 1 }}
+            >
+                <GripVertical size={16} />
+            </div>
+            <input
+                type="text"
+                className={`input ${styles.popupCustomItemName}`}
+                placeholder="Item name"
+                value={item.name}
+                onChange={(e) => onUpdate(item.id, { name: e.target.value })}
+                aria-label="Item name"
+                disabled={disabled}
+            />
+            <input
+                type="number"
+                className={`input ${styles.inputNumberNoSpinners}`}
+                placeholder="Qty"
+                value={item.quantity ?? 1}
+                onChange={(e) => {
+                    const n = parseInt(e.target.value, 10);
+                    onUpdate(item.id, {
+                        quantity: Number.isNaN(n) ? 1 : Math.max(0, n)
+                    });
+                }}
+                onWheel={preventNumberInputWheelNudge}
+                min={0}
+                style={{ width: '60px', textAlign: 'center' }}
+                aria-label="Quantity (default 1)"
+                disabled={disabled}
+            />
+            <input
+                type="number"
+                className={`input ${styles.inputNumberNoSpinners}`}
+                placeholder="Meals"
+                step="0.01"
+                min="0"
+                value={item.value ?? 1}
+                onChange={(e) => {
+                    const v = e.target.value;
+                    onUpdate(item.id, {
+                        value: v === '' ? 1 : (parseFloat(v) || 1)
+                    });
+                }}
+                onWheel={preventNumberInputWheelNudge}
+                style={{ width: '70px', textAlign: 'right' }}
+                aria-label="Meals per item (default 1)"
+                disabled={disabled}
+            />
+            {!disabled && (
+            <button
+                type="button"
+                className={styles.popupCustomItemRemove}
+                onClick={() => onRemove(item.id)}
+                aria-label={`Remove ${item.name || 'item'}`}
+            >
+                <Trash2 size={16} />
+            </button>
+            )}
+        </div>
+    );
+}
+
+interface SortableDefaultOrderItemRowProps {
+    item: MenuItem;
+    template: OrderConfiguration;
+    updateItemQuantity: (itemId: string, qty: number) => void;
+    startEditItem: (item: MenuItem) => void;
+    handleDeleteMenuItem: (id: string) => void;
+}
+
+function SortableDefaultOrderItemRow({ item, template, updateItemQuantity, startEditItem, handleDeleteMenuItem }: SortableDefaultOrderItemRowProps) {
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id });
+    const style = {
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.6 : 1,
+    };
+    return (
+        <div ref={setNodeRef} className={styles.itemRow} style={style}>
+            <div
+                {...attributes}
+                {...listeners}
+                className={styles.mealPlannerDragHandle}
+                aria-label="Drag to reorder"
+                style={{ cursor: 'grab', flexShrink: 0 }}
+            >
+                <GripVertical size={16} />
+            </div>
+            <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 500, marginBottom: '4px' }}>{item.name}</div>
+                <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                    Value: {item.value} | Price: ${item.priceEach || 0}
+                </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}>
+                <button
+                    className="btn btn-secondary"
+                    onClick={() => updateItemQuantity(item.id, (template.vendorSelections?.[0]?.items[item.id] || 0) - 1)}
+                    disabled={(template.vendorSelections?.[0]?.items[item.id] || 0) <= 0}
+                    style={{ minWidth: '32px', padding: '4px 8px' }}
+                >
+                    -
+                </button>
+                <input
+                    type="number"
+                    className={`input ${styles.inputNumberNoSpinners}`}
+                    value={template.vendorSelections?.[0]?.items[item.id] || 0}
+                    onChange={e => updateItemQuantity(item.id, parseInt(e.target.value) || 0)}
+                    onWheel={preventNumberInputWheelNudge}
+                    min="0"
+                    style={{ width: '80px', textAlign: 'center' }}
+                />
+                <button
+                    className="btn btn-secondary"
+                    onClick={() => updateItemQuantity(item.id, (template.vendorSelections?.[0]?.items[item.id] || 0) + 1)}
+                    style={{ minWidth: '32px', padding: '4px 8px' }}
+                >
+                    +
+                </button>
+                <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => startEditItem(item)}
+                    title="Edit item"
+                    style={{ minWidth: '36px', padding: '6px' }}
+                >
+                    <Edit2 size={16} />
+                </button>
+                <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => handleDeleteMenuItem(item.id)}
+                    title="Delete item"
+                    style={{ minWidth: '36px', padding: '6px', color: 'var(--color-danger, #e5534b)' }}
+                >
+                    <Trash2 size={16} />
+                </button>
+            </div>
+        </div>
+    );
+}
+
+interface Props {
+    mainVendor: Vendor;
+    menuItems: MenuItem[];
+    /** When provided, parent can refresh menu items after add/edit/delete */
+    onMenuItemsChange?: () => Promise<void>;
+}
+
+const emptyItemForm = { name: '', value: 0, priceEach: 0, sortOrder: 0 };
+
+export function DefaultOrderTemplate({ mainVendor, menuItems, onMenuItemsChange }: Props) {
+    const { getBoxTypes, getVendors, getCategories } = useDataCache();
+    const [boxTypes, setBoxTypes] = useState<BoxType[]>([]);
+    const [vendors, setVendors] = useState<Vendor[]>([]);
+    const [categories, setCategories] = useState<ItemCategory[]>([]);
+    const [dataLoaded, setDataLoaded] = useState(false);
+    const [template, setTemplate] = useState<OrderConfiguration>({
+        serviceType: 'Food',
+        vendorSelections: [{ vendorId: mainVendor.id, items: {} }]
+    });
+    const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+    const [message, setMessage] = useState<string | null>(null);
+    const [mealPlannerPopupDate, setMealPlannerPopupDate] = useState<string | null>(null);
+    const [mealPlannerDraftItems, setMealPlannerDraftItems] = useState<MealPlannerCustomItem[]>([]);
+    const [mealPlannerExpirationDate, setMealPlannerExpirationDate] = useState<string>('');
+    const [mealPlannerPopupLoading, setMealPlannerPopupLoading] = useState(false);
+    const [mealPlannerPopupSaving, setMealPlannerPopupSaving] = useState(false);
+    /** Message shown inside the meal planner popup (Saving… / Saved / error) so user always sees feedback. */
+    const [mealPlannerPopupStatus, setMealPlannerPopupStatus] = useState<string | null>(null);
+    const [mealPlannerItemCounts, setMealPlannerItemCounts] = useState<Record<string, number>>({});
+    const [mealPlannerMonth, setMealPlannerMonth] = useState(() => {
+        const { year, month } = getDatePartsInAppTz();
+        return new Date(year, month, 1);
+    });
+    // Menu item add/edit (combined with default order list)
+    const [isAddingItem, setIsAddingItem] = useState(false);
+    const [editingItemId, setEditingItemId] = useState<string | null>(null);
+    const [itemForm, setItemForm] = useState(emptyItemForm);
+    const [itemFormSaving, setItemFormSaving] = useState(false);
+
+    const mealPlannerSensors = useSensors(
+        useSensor(PointerSensor, {
+            activationConstraint: { distance: 8 },
+        })
+    );
+
+    useEffect(() => {
+        async function loadData() {
+            const [bt, v, c] = await Promise.all([getBoxTypes(), getVendors(), getCategories()]);
+            setBoxTypes(bt);
+            setVendors(v);
+            setCategories(c);
+            setDataLoaded(true);
+        }
+        loadData();
+    }, [getBoxTypes, getVendors, getCategories]);
+
+    useEffect(() => {
+        // Only load template after reference data is loaded
+        if (dataLoaded) {
+            loadTemplate();
+        }
+    }, [mainVendor.id, dataLoaded]);
+
+    // Ensure default vendor is set for Custom serviceType when vendors are loaded
+    useEffect(() => {
+        if (dataLoaded && template.serviceType === 'Custom' && vendors.length > 0) {
+            const defaultVendor = vendors.find(v => v.isActive) || vendors[0];
+            if (defaultVendor && template.vendorId !== defaultVendor.id) {
+                setTemplate(prev => ({ ...prev, vendorId: defaultVendor.id }));
+            }
+        }
+    }, [dataLoaded, vendors.length, template.serviceType, template.vendorId]);
+
+    // Ensure default empty box exists for Boxes serviceType
+    useEffect(() => {
+        if (dataLoaded && template.serviceType === 'Boxes') {
+            if (!template.boxes || template.boxes.length === 0) {
+                setTemplate(prev => ({
+                    ...prev,
+                    boxes: [{
+                        boxNumber: 1,
+                        boxTypeId: '',
+                        vendorId: mainVendor.id,
+                        items: {},
+                        itemPrices: {},
+                        itemNotes: {}
+                    }]
+                }));
+            }
+        }
+    }, [dataLoaded, template.serviceType, template.boxes?.length, mainVendor.id]);
+
+    // Ensure all boxes have the default vendor set
+    useEffect(() => {
+        if (dataLoaded && template.serviceType === 'Boxes' && template.boxes && template.boxes.length > 0) {
+            const needsUpdate = template.boxes.some(box => !box.vendorId || box.vendorId !== mainVendor.id);
+            if (needsUpdate) {
+                setTemplate(prev => ({
+                    ...prev,
+                    boxes: (prev.boxes || []).map((box: BoxConfiguration) => ({
+                        ...box,
+                        vendorId: mainVendor.id
+                    }))
+                }));
+            }
+        }
+    }, [dataLoaded, template.serviceType, template.boxes, mainVendor.id]);
+
+    // Ensure billAmount is set for Produce serviceType
+    useEffect(() => {
+        if (dataLoaded && template.serviceType === 'Produce') {
+            if (template.billAmount === undefined || template.billAmount === null) {
+                setTemplate(prev => ({
+                    ...prev,
+                    billAmount: 0
+                }));
+            }
+        }
+    }, [dataLoaded, template.serviceType, template.billAmount]);
+
+    async function loadTemplate(serviceTypeToLoad?: string) {
+        setLoading(true);
+        try {
+            const currentServiceType = serviceTypeToLoad || template.serviceType;
+            const saved = await getDefaultOrderTemplate(currentServiceType);
+            if (saved) {
+                // Ensure proper initialization based on service type
+                if (saved.serviceType === 'Food') {
+                    // Ensure vendorId matches main vendor for Food orders
+                    if (saved.vendorSelections && saved.vendorSelections.length > 0) {
+                        saved.vendorSelections[0].vendorId = mainVendor.id;
+                    } else {
+                        saved.vendorSelections = [{ vendorId: mainVendor.id, items: {} }];
+                    }
+                } else if (saved.serviceType === 'Boxes') {
+                    // Ensure boxes array exists - create empty default box if none exists
+                    if (!saved.boxes || saved.boxes.length === 0) {
+                        saved.boxes = [{
+                            boxNumber: 1,
+                            boxTypeId: '',
+                            vendorId: mainVendor.id,
+                            items: {},
+                            itemPrices: {},
+                            itemNotes: {}
+                        }];
+                    } else {
+                        // Ensure all boxes have the default vendor set
+                        saved.boxes = saved.boxes.map((box: BoxConfiguration) => ({
+                            ...box,
+                            vendorId: box.vendorId || mainVendor.id
+                        }));
+                    }
+                } else if (saved.serviceType === 'Custom') {
+                    // Ensure customItems array exists
+                    if (!saved.customItems) {
+                        saved.customItems = [];
+                    }
+                    // Ensure vendorId is set to default vendor
+                    const defaultVendor = vendors.find(v => v.isActive) || vendors[0];
+                    if (defaultVendor) {
+                        saved.vendorId = defaultVendor.id;
+                    }
+                } else if (saved.serviceType === 'Produce') {
+                    // Ensure billAmount exists
+                    if (saved.billAmount === undefined || saved.billAmount === null) {
+                        saved.billAmount = 0;
+                    }
+                }
+                setTemplate(saved);
+            } else {
+                // Initialize with default structure based on service type
+                if (currentServiceType === 'Food') {
+                    setTemplate({
+                        serviceType: 'Food',
+                        vendorSelections: [{ vendorId: mainVendor.id, items: {} }]
+                    });
+                } else if (currentServiceType === 'Boxes') {
+                    setTemplate({
+                        serviceType: 'Boxes',
+                        boxes: [{
+                            boxNumber: 1,
+                            boxTypeId: '',
+                            vendorId: mainVendor.id,
+                            items: {},
+                            itemPrices: {},
+                            itemNotes: {}
+                        }]
+                    });
+                } else if (currentServiceType === 'Custom') {
+                    const defaultVendor = vendors.find(v => v.isActive) || vendors[0];
+                    setTemplate({
+                        serviceType: 'Custom',
+                        vendorId: defaultVendor?.id || '',
+                        customItems: []
+                    });
+                } else if (currentServiceType === 'Produce') {
+                    setTemplate({
+                        serviceType: 'Produce',
+                        billAmount: 0
+                    });
+                } else {
+                    setTemplate({
+                        serviceType: currentServiceType as any,
+                        vendorSelections: [{ vendorId: mainVendor.id, items: {} }]
+                    });
+                }
+            }
+        } catch (error) {
+            console.error('Error loading template:', error);
+            setMessage('Error loading template');
+            setTimeout(() => setMessage(null), 3000);
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    async function handleSave() {
+        setSaving(true);
+        setMessage(null);
+        try {
+            const templateToSave = { ...template };
+
+            // Clean and validate based on service type
+            if (templateToSave.serviceType === 'Food') {
+                // Ensure vendorId matches main vendor for Food orders
+                templateToSave.vendorSelections = templateToSave.vendorSelections?.map((vs, index) =>
+                    index === 0 ? { ...vs, vendorId: mainVendor.id } : vs
+                ) || [{ vendorId: mainVendor.id, items: {} }];
+                // Remove boxes and customItems for Food
+                delete templateToSave.boxes;
+                delete templateToSave.customItems;
+                delete templateToSave.vendorId;
+            } else if (templateToSave.serviceType === 'Boxes') {
+                // Ensure boxes array is valid - create empty default box if none exists
+                if (!templateToSave.boxes || templateToSave.boxes.length === 0) {
+                    templateToSave.boxes = [{
+                        boxNumber: 1,
+                        boxTypeId: '',
+                        vendorId: mainVendor.id,
+                        items: {},
+                        itemPrices: {},
+                        itemNotes: {}
+                    }];
+                } else {
+                    // Ensure all boxes have the default vendor set
+                    templateToSave.boxes = templateToSave.boxes.map((box: BoxConfiguration) => ({
+                        ...box,
+                        vendorId: box.vendorId || mainVendor.id
+                    }));
+                }
+                // Remove Food and Custom fields
+                delete templateToSave.vendorSelections;
+                delete templateToSave.customItems;
+            } else if (templateToSave.serviceType === 'Custom') {
+                // Ensure customItems array exists and is valid
+                if (!templateToSave.customItems) {
+                    templateToSave.customItems = [];
+                }
+                // Filter out empty items
+                templateToSave.customItems = templateToSave.customItems.filter(
+                    item => item.name && item.name.trim() !== ''
+                );
+                // Ensure vendorId is set to default vendor
+                const defaultVendor = vendors.find(v => v.isActive) || vendors[0];
+                if (defaultVendor) {
+                    templateToSave.vendorId = defaultVendor.id;
+                }
+                // Remove Food, Boxes, and Produce fields
+                delete templateToSave.vendorSelections;
+                delete templateToSave.boxes;
+                delete templateToSave.billAmount;
+            } else if (templateToSave.serviceType === 'Produce') {
+                // Ensure billAmount exists and is valid
+                if (templateToSave.billAmount === undefined || templateToSave.billAmount === null) {
+                    templateToSave.billAmount = 0;
+                }
+                // Remove Food, Boxes, and Custom fields
+                delete templateToSave.vendorSelections;
+                delete templateToSave.boxes;
+                delete templateToSave.customItems;
+                delete templateToSave.vendorId;
+            }
+
+            // Save template for the specific serviceType
+            await saveDefaultOrderTemplate(templateToSave, templateToSave.serviceType);
+            clearDefaultOrderTemplateCache(); // So client profile/portal load fresh template on next open
+            setTemplate(templateToSave);
+            setMessage(`Default order template for ${templateToSave.serviceType} saved successfully!`);
+            setTimeout(() => setMessage(null), 3000);
+        } catch (error) {
+            console.error('Error saving template:', error);
+            setMessage('Error saving template');
+            setTimeout(() => setMessage(null), 3000);
+        } finally {
+            setSaving(false);
+        }
+    }
+
+    function updateItemQuantity(itemId: string, quantity: number) {
+        const newItems = { ...template.vendorSelections?.[0]?.items || {} };
+        if (quantity > 0) {
+            newItems[itemId] = quantity;
+        } else {
+            delete newItems[itemId];
+        }
+
+        setTemplate({
+            ...template,
+            vendorSelections: [{
+                vendorId: mainVendor.id,
+                items: newItems
+            }]
+        });
+    }
+
+    async function handleServiceTypeChange(newServiceType: string) {
+        // Load template for the new serviceType
+        await loadTemplate(newServiceType);
+    }
+
+    // Box management functions
+    function addBox() {
+        const currentBoxes = template.boxes || [];
+        const nextBoxNumber = currentBoxes.length + 1;
+
+        const newBox: BoxConfiguration = {
+            boxNumber: nextBoxNumber,
+            boxTypeId: '',
+            vendorId: mainVendor.id,
+            items: {},
+            itemPrices: {},
+            itemNotes: {}
+        };
+
+        setTemplate({
+            ...template,
+            boxes: [...currentBoxes, newBox]
+        });
+    }
+
+    function removeBox(boxNumber: number) {
+        const updatedBoxes = (template.boxes || [])
+            .filter(b => b.boxNumber !== boxNumber)
+            .map((b, index) => ({ ...b, boxNumber: index + 1 })); // Renumber
+
+        setTemplate({
+            ...template,
+            boxes: updatedBoxes
+        });
+    }
+
+    function updateBoxItem(boxNumber: number, itemId: string, quantity: number) {
+        const updatedBoxes = (template.boxes || []).map(box => {
+            if (box.boxNumber !== boxNumber) return box;
+            const newItems = { ...(box.items || {}) };
+            if (quantity > 0) {
+                newItems[itemId] = quantity;
+            } else {
+                delete newItems[itemId];
+            }
+            return { ...box, items: newItems };
+        });
+
+        setTemplate({
+            ...template,
+            boxes: updatedBoxes
+        });
+    }
+
+
+    // Custom items management functions
+    function addCustomItem() {
+        const customItems = template.customItems || [];
+        setTemplate({
+            ...template,
+            customItems: [...customItems, { name: '', price: 0, quantity: 1 }]
+        });
+    }
+
+    function removeCustomItem(index: number) {
+        const customItems = [...(template.customItems || [])];
+        customItems.splice(index, 1);
+        setTemplate({
+            ...template,
+            customItems
+        });
+    }
+
+    function updateCustomItem(index: number, field: 'name' | 'price' | 'quantity', value: string | number) {
+        const customItems = [...(template.customItems || [])];
+        customItems[index] = {
+            ...customItems[index],
+            [field]: field === 'name' ? value : (field === 'price' ? parseFloat(value as string) || 0 : parseInt(value as string) || 1)
+        };
+        setTemplate({
+            ...template,
+            customItems
+        });
+    }
+
+    function cancelItemForm() {
+        setIsAddingItem(false);
+        setEditingItemId(null);
+        setItemForm(emptyItemForm);
+    }
+
+    function startAddItem() {
+        setEditingItemId(null);
+        const maxSort = menuItems.length ? Math.max(...menuItems.map(i => i.sortOrder ?? 0), 0) : 0;
+        setItemForm({ name: '', value: 0, priceEach: 0, sortOrder: maxSort + 1 });
+        setIsAddingItem(true);
+    }
+
+    function startEditItem(item: MenuItem) {
+        setIsAddingItem(false);
+        setEditingItemId(item.id);
+        setItemForm({
+            name: item.name,
+            value: item.value ?? 0,
+            priceEach: item.priceEach ?? 0,
+            sortOrder: item.sortOrder ?? 0
+        });
+    }
+
+    async function handleSaveNewItem() {
+        if (!itemForm.name?.trim()) return;
+        if (!itemForm.priceEach || itemForm.priceEach <= 0) {
+            setMessage('Price must be greater than 0');
+            setTimeout(() => setMessage(null), 3000);
+            return;
+        }
+        setItemFormSaving(true);
+        try {
+            await addMenuItem({
+                vendorId: mainVendor.id,
+                name: itemForm.name.trim(),
+                value: itemForm.value,
+                priceEach: itemForm.priceEach,
+                isActive: true,
+                sortOrder: itemForm.sortOrder
+            } as Omit<MenuItem, 'id'>);
+            try {
+                await onMenuItemsChange?.();
+            } catch (refreshErr) {
+                console.error('[DefaultOrderTemplate] Refresh after add failed:', refreshErr);
+                // Save succeeded; user can refresh page to see changes
+            }
+            cancelItemForm();
+        } catch (e: any) {
+            console.error('[DefaultOrderTemplate] Add item failed:', e);
+            const msg = e?.message || (typeof e === 'string' ? e : 'Failed to add item');
+            setMessage(msg);
+            setTimeout(() => setMessage(null), 5000);
+        } finally {
+            setItemFormSaving(false);
+        }
+    }
+
+    async function handleSaveEditItem() {
+        if (!editingItemId || !itemForm.name?.trim()) return;
+        if (!itemForm.priceEach || itemForm.priceEach <= 0) {
+            setMessage('Price must be greater than 0');
+            setTimeout(() => setMessage(null), 3000);
+            return;
+        }
+        setItemFormSaving(true);
+        try {
+            await updateMenuItem(editingItemId, {
+                name: itemForm.name.trim(),
+                value: itemForm.value,
+                priceEach: itemForm.priceEach,
+                sortOrder: itemForm.sortOrder
+            });
+            try {
+                await onMenuItemsChange?.();
+            } catch (refreshErr) {
+                console.error('[DefaultOrderTemplate] Refresh after edit failed:', refreshErr);
+            }
+            cancelItemForm();
+        } catch (e: any) {
+            console.error('[DefaultOrderTemplate] Update item failed:', e);
+            const msg = e?.message || (typeof e === 'string' ? e : 'Failed to update item');
+            setMessage(msg);
+            setTimeout(() => setMessage(null), 5000);
+        } finally {
+            setItemFormSaving(false);
+        }
+    }
+
+    async function handleDeleteMenuItem(id: string) {
+        if (!confirm('Delete this menu item? It may be deactivated instead if used by orders.')) return;
+        try {
+            const result = await deleteMenuItem(id);
+            if (result && typeof result === 'object' && !result.success && result.message) {
+                setMessage(result.message);
+                setTimeout(() => setMessage(null), 5000);
+            }
+            await onMenuItemsChange?.();
+        } catch (e: any) {
+            setMessage(e?.message || 'Failed to delete item');
+            setTimeout(() => setMessage(null), 3000);
+        }
+    }
+
+    const orderedMenuItems = useMemo(
+        () => [...menuItems].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)),
+        [menuItems]
+    );
+
+    function handleDefaultOrderDragEnd(event: DragEndEvent) {
+        const { active, over } = event;
+        if (!over || active.id === over.id) return;
+        const oldIndex = orderedMenuItems.findIndex((i) => i.id === active.id);
+        const newIndex = orderedMenuItems.findIndex((i) => i.id === over.id);
+        if (oldIndex === -1 || newIndex === -1) return;
+        const reordered = arrayMove(orderedMenuItems, oldIndex, newIndex);
+        const updates = reordered.map((item, index) => ({ id: item.id, sortOrder: index }));
+        updateMenuItemOrder(updates).then(() => onMenuItemsChange?.()).catch((e: any) => {
+            setMessage(e?.message || 'Failed to update order');
+            setTimeout(() => setMessage(null), 3000);
+        });
+    }
+
+    const defaultOrderSensors = useSensors(
+        useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+    );
+
+    // Get box items (items without vendorId)
+    function getBoxItems() {
+        return menuItems.filter(item =>
+            (item.vendorId === null || item.vendorId === '') && item.isActive
+        );
+    }
+
+    // Meal Planner calendar: days for current month in EST (with leading empty cells)
+    const mealPlannerDays = useMemo(() => {
+        const year = mealPlannerMonth.getFullYear();
+        const month = mealPlannerMonth.getMonth();
+        return getCalendarDaysForMonthInAppTz(year, month);
+    }, [mealPlannerMonth]);
+
+    const mealPlannerMonthYear = mealPlannerMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+    // Load meal planner item counts for the current month when Food service type is selected
+    useEffect(() => {
+        if (template.serviceType !== 'Food') return;
+        const year = mealPlannerMonth.getFullYear();
+        const month = mealPlannerMonth.getMonth();
+        const startDate = `${year}-${String(month + 1).padStart(2, '0')}-01`;
+        const lastDay = new Date(year, month + 1, 0).getDate();
+        const endDate = `${year}-${String(month + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+        getMealPlannerItemCountsByDate(startDate, endDate, null).then(setMealPlannerItemCounts);
+    }, [mealPlannerMonth, template.serviceType]);
+
+    /** Check if a date is in the past (before today in EST) */
+    function isDatePast(dateKey: string): boolean {
+        const todayStr = getTodayInAppTz();
+        return dateKey.trim().slice(0, 10) < todayStr;
+    }
+
+    /** Open meal planner dialog for a date. Loads existing records from DB for that date and auto-populates the dialog when they match. */
+    async function openMealPlannerPopup(dateKey: string) {
+        setMealPlannerPopupDate(dateKey);
+        setMealPlannerPopupLoading(true);
+        setMealPlannerPopupStatus(null);
+        setMealPlannerDraftItems([]);
+        setMealPlannerExpirationDate('');
+        try {
+            const { items, expirationDate } = await getMealPlannerCustomItems(dateKey, null);
+            setMealPlannerDraftItems(
+                items.map((i) => ({
+                    id: i.id,
+                    name: i.name,
+                    quantity: i.quantity ?? 1,
+                    value: i.value ?? 1,
+                    sortOrder: i.sortOrder ?? 0
+                }))
+            );
+            const loadedExp = expirationDate ?? dateKey;
+            setMealPlannerExpirationDate(loadedExp > dateKey ? dateKey : loadedExp);
+        } catch (e) {
+            setMessage('Error loading meal planner items.');
+            setTimeout(() => setMessage(null), 3000);
+        } finally {
+            setMealPlannerPopupLoading(false);
+        }
+    }
+
+    function addMealPlannerDraftItem() {
+        setMealPlannerDraftItems((prev) => {
+            const maxSort = prev.reduce((m, i) => Math.max(m, i.sortOrder ?? 0), -1);
+            const id =
+                typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+                    ? `custom-${crypto.randomUUID()}`
+                    : `custom-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+            return [
+                ...prev,
+                {
+                    id,
+                    name: '',
+                    quantity: 1,
+                    value: 1,
+                    sortOrder: maxSort + 1
+                }
+            ];
+        });
+    }
+
+    async function handleMealPlannerSave() {
+        setMealPlannerPopupSaving(true);
+        setMessage(null);
+        setMealPlannerPopupStatus('Saving…');
+        if (typeof window !== 'undefined') {
+            console.log('[Meal planner] Save clicked for date:', mealPlannerPopupDate);
+        }
+
+        try {
+            if (!mealPlannerPopupDate) {
+                setMealPlannerPopupStatus('No date selected.');
+                setMessage('No date selected. Close and click a date again.');
+                setTimeout(() => { setMessage(null); setMealPlannerPopupStatus(null); }, 4000);
+                return;
+            }
+            const expTrim = mealPlannerExpirationDate.trim();
+            if (expTrim && mealPlannerPopupDate && expTrim > mealPlannerPopupDate) {
+                setMealPlannerPopupStatus('Expiration date cannot be after the delivery date.');
+                setMessage('Expiration date cannot be after the delivery date for this day.');
+                setTimeout(() => { setMessage(null); setMealPlannerPopupStatus(null); }, 3000);
+                return;
+            }
+            const valid = mealPlannerDraftItems.filter(
+                (i) => (i.name ?? '').trim().length > 0
+            );
+            const savePayload = {
+                date: mealPlannerPopupDate,
+                items: valid.map((i) => ({
+                    id: i.id,
+                    name: i.name,
+                    quantity: i.quantity ?? 1,
+                    value: i.value ?? 1,
+                    sortOrder: i.sortOrder ?? 0
+                })),
+                exp: expTrim || null
+            };
+            if (typeof window !== 'undefined') {
+                console.log('[Meal planner] Calling saveMealPlannerCustomItems...', savePayload.date, 'items:', savePayload.items.length);
+            }
+            const expectedTotal = totalQtyFromMealPlannerDraft(mealPlannerDraftItems);
+            const savePromise = saveMealPlannerCustomItems(
+                mealPlannerPopupDate,
+                savePayload.items,
+                null,
+                savePayload.exp,
+                expectedTotal
+            );
+            const timeoutMs = 20000;
+            const timeoutPromise = new Promise<never>((_, reject) => {
+                setTimeout(() => reject(new Error('Save timed out. Please try again.')), timeoutMs);
+            });
+            await Promise.race([savePromise, timeoutPromise]);
+            if (typeof window !== 'undefined') {
+                console.log('[Meal planner] Save completed successfully.');
+            }
+            setMealPlannerItemCounts((prev) => {
+                const next = { ...prev };
+                if (valid.length > 0) next[mealPlannerPopupDate] = valid.length;
+                else delete next[mealPlannerPopupDate];
+                return next;
+            });
+            setMealPlannerPopupStatus('Saved!');
+            setMessage(`Custom items for ${mealPlannerPopupDate} saved.`);
+            setTimeout(() => setMessage(null), 3000);
+            setMealPlannerPopupDate(null);
+            setMealPlannerDraftItems([]);
+            setMealPlannerPopupStatus(null);
+        } catch (e) {
+            console.error('[handleMealPlannerSave]', e);
+            const errMsg = e instanceof Error ? e.message : 'Error saving meal planner items.';
+            setMealPlannerPopupStatus(errMsg);
+            setMessage(errMsg);
+            setTimeout(() => { setMessage(null); setMealPlannerPopupStatus(null); }, 5000);
+        } finally {
+            setMealPlannerPopupSaving(false);
+        }
+    }
+
+    async function handleMealPlannerClearDay() {
+        if (!mealPlannerPopupDate || isDatePast(mealPlannerPopupDate)) return;
+        setMealPlannerPopupSaving(true);
+        setMessage(null);
+        setMealPlannerPopupStatus('Clearing…');
+        try {
+            await saveMealPlannerCustomItems(mealPlannerPopupDate, [], null);
+            setMealPlannerItemCounts((prev) => {
+                const next = { ...prev };
+                delete next[mealPlannerPopupDate];
+                return next;
+            });
+            setMessage('Day cleared.');
+            closeMealPlannerPopup();
+        } catch (e) {
+            console.error('[handleMealPlannerClearDay]', e);
+            const errMsg = e instanceof Error ? e.message : 'Error clearing day.';
+            setMealPlannerPopupStatus(errMsg);
+            setMessage(errMsg);
+            setTimeout(() => { setMessage(null); setMealPlannerPopupStatus(null); }, 5000);
+        } finally {
+            setMealPlannerPopupSaving(false);
+            setMealPlannerPopupStatus(null);
+        }
+    }
+
+    function closeMealPlannerPopup() {
+        setMealPlannerPopupDate(null);
+        setMealPlannerDraftItems([]);
+        setMealPlannerExpirationDate('');
+    }
+
+    function handleMealPlannerDragEnd(event: DragEndEvent) {
+        const { active, over } = event;
+        if (!over || active.id === over.id) return;
+        const ordered = [...mealPlannerDraftItems].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+        const oldIndex = ordered.findIndex((i) => i.id === active.id);
+        const newIndex = ordered.findIndex((i) => i.id === over.id);
+        if (oldIndex === -1 || newIndex === -1) return;
+        const reordered = arrayMove(ordered, oldIndex, newIndex);
+        setMealPlannerDraftItems(reordered.map((item, index) => ({ ...item, sortOrder: index })));
+    }
+
+    const mealPlannerOrderedItems = useMemo(
+        () => [...mealPlannerDraftItems].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)),
+        [mealPlannerDraftItems]
+    );
+
+    const mealPlannerExpectedTotalMealsDisplay = useMemo(() => {
+        if (!mealPlannerPopupDate || mealPlannerPopupLoading) return '';
+        return String(totalQtyFromMealPlannerDraft(mealPlannerDraftItems));
+    }, [mealPlannerPopupDate, mealPlannerPopupLoading, mealPlannerDraftItems]);
+
+    const handleUpdateMealPlannerDraftItem = useCallback(
+        (id: string, patch: Partial<Pick<MealPlannerCustomItem, 'name' | 'quantity' | 'value' | 'sortOrder'>>) => {
+            setMealPlannerDraftItems((prev) =>
+                prev.map((item) => (item.id !== id ? item : { ...item, ...patch }))
+            );
+        },
+        []
+    );
+
+    const handleRemoveMealPlannerDraftItem = useCallback((id: string) => {
+        setMealPlannerDraftItems((prev) => prev.filter((item) => item.id !== id));
+    }, []);
+
+    if (loading) {
+        return (
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
+                <Loader2 className="animate-spin" size={32} />
+            </div>
+        );
+    }
+
+    return (
+        <div className={styles.container}>
+            <div className={styles.header}>
+                <div>
+                    <h2 className={styles.title}>Default Order Template</h2>
+                    <p className={styles.subtitle}>
+                        Set the default order configuration for newly created clients. This template will be applied when a new client is created.
+                    </p>
+                </div>
+            </div>
+
+            {message && (
+                <div className={styles.message} style={{
+                    padding: 'var(--spacing-sm) var(--spacing-md)',
+                    marginBottom: 'var(--spacing-md)',
+                    borderRadius: 'var(--radius-sm)',
+                    backgroundColor: message.includes('Error') ? 'rgba(239, 68, 68, 0.1)' : 'rgba(34, 197, 94, 0.1)',
+                    color: message.includes('Error') ? 'var(--color-danger)' : 'var(--color-success)'
+                }}>
+                    {message}
+                </div>
+            )}
+
+            <div className={styles.formCard}>
+                <h3 className={styles.sectionTitle}>Service Type</h3>
+                <select
+                    className="input"
+                    value={template.serviceType}
+                    onChange={e => handleServiceTypeChange(e.target.value)}
+                    style={{ maxWidth: '300px' }}
+                >
+                    <option value="Food">Food</option>
+                    <option value="Produce">Produce</option>
+                </select>
+            </div>
+
+            {template.serviceType === 'Food' && (
+                <>
+                <div className={styles.formCard}>
+                    <h3 className={styles.sectionTitle}>Menu Items</h3>
+                    <p className={styles.description}>
+                        Select the default items and quantities for new clients. Drag the handle to reorder; add, edit, or remove menu items below.
+                    </p>
+
+                    {(isAddingItem || editingItemId) && (
+                        <div className={styles.itemRow} style={{ flexWrap: 'wrap', gap: 'var(--spacing-sm)', alignItems: 'flex-end', marginBottom: 'var(--spacing-md)', padding: 'var(--spacing-md)', background: 'var(--bg-secondary, rgba(255,255,255,0.03))', borderRadius: '8px' }}>
+                            <div style={{ flex: '1 1 120px', minWidth: 0 }}>
+                                <label className="label" style={{ display: 'block', marginBottom: 4 }}>Name</label>
+                                <input
+                                    className="input"
+                                    value={itemForm.name}
+                                    onChange={e => setItemForm(f => ({ ...f, name: e.target.value }))}
+                                    placeholder="Item name"
+                                />
+                            </div>
+                            <div style={{ width: '80px' }}>
+                                <label className="label" style={{ display: 'block', marginBottom: 4 }}>Value</label>
+                                <input
+                                    type="number"
+                                    className={`input ${styles.inputNumberNoSpinners}`}
+                                    value={itemForm.value}
+                                    onChange={e => setItemForm(f => ({ ...f, value: Number(e.target.value) || 0 }))}
+                                    onWheel={preventNumberInputWheelNudge}
+                                />
+                            </div>
+                            <div style={{ width: '90px' }}>
+                                <label className="label" style={{ display: 'block', marginBottom: 4 }}>Price</label>
+                                <input
+                                    type="number"
+                                    className={`input ${styles.inputNumberNoSpinners}`}
+                                    value={itemForm.priceEach}
+                                    onChange={e => setItemForm(f => ({ ...f, priceEach: Number(e.target.value) || 0 }))}
+                                    onWheel={preventNumberInputWheelNudge}
+                                    min="0"
+                                    step="0.01"
+                                />
+                            </div>
+                            <div style={{ width: '70px' }}>
+                                <label className="label" style={{ display: 'block', marginBottom: 4 }}>Order</label>
+                                <input
+                                    type="number"
+                                    className={`input ${styles.inputNumberNoSpinners}`}
+                                    value={itemForm.sortOrder}
+                                    onChange={e => setItemForm(f => ({ ...f, sortOrder: Number(e.target.value) || 0 }))}
+                                    onWheel={preventNumberInputWheelNudge}
+                                    min="0"
+                                />
+                            </div>
+                            <div style={{ display: 'flex', gap: 8 }}>
+                                <button type="button" className="btn btn-primary" onClick={editingItemId ? handleSaveEditItem : handleSaveNewItem} disabled={itemFormSaving}>
+                                    {itemFormSaving ? <Loader2 className="animate-spin" size={16} /> : <Check size={16} />}
+                                    {itemFormSaving ? 'Saving...' : 'Save'}
+                                </button>
+                                <button type="button" className="btn btn-secondary" onClick={cancelItemForm} disabled={itemFormSaving}>Cancel</button>
+                            </div>
+                        </div>
+                    )}
+
+                    {menuItems.length === 0 && !isAddingItem ? (
+                        <p style={{ color: 'var(--text-secondary)', fontStyle: 'italic', marginBottom: 'var(--spacing-md)' }}>
+                            No menu items yet.
+                        </p>
+                    ) : null}
+                    {menuItems.length > 0 && (
+                        <DndContext
+                            sensors={defaultOrderSensors}
+                            collisionDetection={closestCenter}
+                            onDragEnd={handleDefaultOrderDragEnd}
+                        >
+                            <SortableContext
+                                items={orderedMenuItems.map((i) => i.id)}
+                                strategy={verticalListSortingStrategy}
+                            >
+                                <div className={styles.itemsList}>
+                                    {orderedMenuItems.map((item) => {
+                                        if (editingItemId === item.id) return null;
+                                        return (
+                                            <SortableDefaultOrderItemRow
+                                                key={item.id}
+                                                item={item}
+                                                template={template}
+                                                updateItemQuantity={updateItemQuantity}
+                                                startEditItem={startEditItem}
+                                                handleDeleteMenuItem={handleDeleteMenuItem}
+                                            />
+                                        );
+                                    })}
+                                </div>
+                            </SortableContext>
+                        </DndContext>
+                    )}
+
+                    {!isAddingItem && !editingItemId && (
+                        <button type="button" className="btn btn-primary" onClick={startAddItem} style={{ marginTop: 'var(--spacing-md)' }}>
+                            <Plus size={16} /> Add item
+                        </button>
+                    )}
+                </div>
+                <div style={{ marginTop: 'var(--spacing-lg)', marginBottom: 'var(--spacing-lg)' }}>
+                    <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+                        {saving ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}
+                        {saving ? 'Saving...' : 'Save Template'}
+                    </button>
+                </div>
+                </>
+            )}
+
+            {template.serviceType === 'Food' && (
+                <div className={styles.formCard}>
+                    <h3 className={styles.sectionTitle}>Meal Planner</h3>
+                    <p className={styles.description}>
+                        Click a date to add or edit custom meal items for that day. Items are saved to the database.
+                    </p>
+                    <div className={styles.mealPlannerCalendar}>
+                        <div className={styles.calendarHeader}>
+                            <button
+                                type="button"
+                                className={styles.calendarNav}
+                                onClick={() => setMealPlannerMonth(new Date(mealPlannerMonth.getFullYear(), mealPlannerMonth.getMonth() - 1, 1))}
+                                aria-label="Previous month"
+                            >
+                                <ChevronLeft size={20} />
+                            </button>
+                            <span className={styles.calendarMonthYear}>{mealPlannerMonthYear}</span>
+                            <button
+                                type="button"
+                                className={styles.calendarNav}
+                                onClick={() => setMealPlannerMonth(new Date(mealPlannerMonth.getFullYear(), mealPlannerMonth.getMonth() + 1, 1))}
+                                aria-label="Next month"
+                            >
+                                <ChevronRight size={20} />
+                            </button>
+                        </div>
+                        <div className={styles.calendarWeekdays}>
+                            {WEEKDAY_LABELS.map((label) => (
+                                <div key={label} className={styles.calendarWeekday}>{label}</div>
+                            ))}
+                        </div>
+                        <div className={styles.calendarGrid}>
+                            {mealPlannerDays.map((cell, index) => {
+                                const dateKey = cell ? cell.dateKey : null;
+                                const dayNum = cell ? cell.dayNum : null;
+                                const indicator = dateKey != null ? (mealPlannerItemCounts[dateKey] ?? null) : null;
+                                const hasPlan = indicator != null;
+                                const isTodayCell = dateKey === getTodayInAppTz();
+                                return (
+                                    <div
+                                        key={dateKey ?? `empty-${index}`}
+                                        className={[
+                                            cell ? styles.calendarDay : styles.calendarDayEmpty,
+                                            cell && hasPlan && styles.calendarDayHasPlan,
+                                            cell && isTodayCell && styles.calendarDayToday,
+                                        ].filter(Boolean).join(' ')}
+                                        onClick={dateKey ? () => openMealPlannerPopup(dateKey) : undefined}
+                                        role={cell ? 'button' : undefined}
+                                        tabIndex={cell ? 0 : undefined}
+                                        onKeyDown={dateKey ? (e) => { if (e.key === 'Enter' || e.key === ' ') openMealPlannerPopup(dateKey); } : undefined}
+                                        title={cell && hasPlan ? `Meal plan saved · ${indicator} item${indicator !== 1 ? 's' : ''}` : undefined}
+                                    >
+                                        {cell && (
+                                            <>
+                                                {hasPlan && (
+                                                    <span className={styles.calendarDayCheck} aria-hidden>
+                                                        <Check size={12} strokeWidth={2.5} />
+                                                    </span>
+                                                )}
+                                                <span className={styles.calendarDayNum}>{dayNum}</span>
+                                                {hasPlan && (
+                                                    <span className={styles.calendarDayIndicator} aria-hidden>
+                                                        {indicator}
+                                                    </span>
+                                                )}
+                                            </>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                        <div className={styles.calendarLegend} aria-hidden>
+                            <span className={styles.calendarLegendItem}>
+                                <Check size={14} strokeWidth={2.5} />
+                                <span>Meal plan saved</span>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {mealPlannerPopupDate && (
+                <div
+                    className={styles.popupOverlay}
+                    onClick={(e) => {
+                        // Only close when clicking the backdrop, not when clicking the dialog content (e.g. Save button)
+                        if (e.target === e.currentTarget) closeMealPlannerPopup();
+                    }}
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="meal-planner-popup-title"
+                >
+                    <div className={`${styles.popupContent} ${styles.popupContentMealPlanner}`}>
+                        <div className={styles.popupHeader}>
+                            <div>
+                                <h3 id="meal-planner-popup-title" className={styles.popupTitle}>
+                                    Meal planner default template
+                                </h3>
+                                <span className={styles.popupTitleDate}>
+                                    {(() => {
+                                        const [y, m, d] = mealPlannerPopupDate.split('-').map(Number);
+                                        return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+                                    })()}
+                                </span>
+                            </div>
+                            <button
+                                type="button"
+                                className={styles.popupClose}
+                                onClick={closeMealPlannerPopup}
+                                aria-label="Close"
+                            >
+                                <X size={18} />
+                            </button>
+                        </div>
+                        <div className={styles.popupBody}>
+                            {(() => {
+                                const isPast = isDatePast(mealPlannerPopupDate);
+                                return (
+                                    <>
+                                        {isPast && (
+                                            <div style={{
+                                                padding: 'var(--spacing-md) var(--spacing-lg)',
+                                                marginBottom: 'var(--spacing-lg)',
+                                                borderRadius: 'var(--radius-md)',
+                                                backgroundColor: 'rgba(239, 68, 68, 0.08)',
+                                                color: 'var(--color-danger)',
+                                                fontSize: '0.9rem',
+                                                border: '1px solid rgba(239, 68, 68, 0.25)'
+                                            }}>
+                                                This date is in the past. You cannot add, update, or delete items for past dates.
+                                            </div>
+                                        )}
+                                        <p className={styles.popupDemoNote}>
+                                            {mealPlannerDraftItems.length > 0
+                                                ? `${mealPlannerDraftItems.length} saved item(s) for this date. ${isPast ? 'View only.' : 'Edit below or add more.'}`
+                                                : isPast ? 'No items for this date. View only.' : 'Add custom items for this date. Drag rows to reorder.'}
+                                        </p>
+                                        <div className={styles.popupSection} style={{ marginBottom: 'var(--spacing-lg)', display: 'flex', flexWrap: 'wrap', gap: 'var(--spacing-lg)', alignItems: 'flex-end' }}>
+                                            <div>
+                                                <label htmlFor="meal-planner-expiration-date" className={styles.popupSectionLabel}>
+                                                    Expiration date
+                                                </label>
+                                                <input
+                                                    id="meal-planner-expiration-date"
+                                                    type="date"
+                                                    className="input"
+                                                    value={mealPlannerExpirationDate}
+                                                    onChange={(e) => setMealPlannerExpirationDate(e.target.value)}
+                                                    max={mealPlannerPopupDate}
+                                                    disabled={isPast}
+                                                    style={{ maxWidth: '12rem' }}
+                                                    aria-label="Expiration date"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label htmlFor="meal-planner-expected-total" className={styles.popupSectionLabel}>
+                                                    Expected total meals (sum of quantities)
+                                                </label>
+                                                <input
+                                                    id="meal-planner-expected-total"
+                                                    type="text"
+                                                    className="input"
+                                                    readOnly
+                                                    inputMode="numeric"
+                                                    value={mealPlannerExpectedTotalMealsDisplay}
+                                                    title="Updates automatically when you add items or change quantities."
+                                                    style={{ maxWidth: '8rem', opacity: isPast ? 0.85 : 1 }}
+                                                    aria-label="Expected total meals (sum of line quantities)"
+                                                />
+                                            </div>
+                                        </div>
+                                        {mealPlannerPopupLoading ? (
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: 'var(--spacing-lg)', color: 'var(--text-secondary)' }}>
+                                                <Loader2 className="animate-spin" size={18} />
+                                                Loading…
+                                            </div>
+                                        ) : (
+                                            <>
+                            {!isPast && (
+                                <button
+                                    type="button"
+                                    className={`btn btn-secondary ${styles.popupAddItemBtn}`}
+                                    onClick={addMealPlannerDraftItem}
+                                    style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: 'var(--spacing-md)' }}
+                                >
+                                    <Plus size={16} />
+                                    Add item
+                                </button>
+                            )}
+                            <div className={styles.popupItemsList}>
+                                {mealPlannerDraftItems.length > 0 && (
+                                    <div className={styles.popupCustomItemHeader} aria-hidden>
+                                        <span className={styles.mealPlannerDragHandleHeader} />
+                                        <span className={styles.popupCustomItemName}>Name</span>
+                                        <span style={{ width: '60px', textAlign: 'center' }}>Qty</span>
+                                        <span style={{ width: '70px', textAlign: 'right' }}>Value</span>
+                                        {!isPast && <span style={{ width: '40px' }} />}
+                                    </div>
+                                )}
+                                <DndContext
+                                    sensors={mealPlannerSensors}
+                                    collisionDetection={closestCenter}
+                                    onDragEnd={handleMealPlannerDragEnd}
+                                >
+                                    <SortableContext
+                                        items={mealPlannerOrderedItems.map((i) => i.id)}
+                                        strategy={verticalListSortingStrategy}
+                                    >
+                                        {mealPlannerOrderedItems.length === 0 ? (
+                                            <p className={styles.popupNoItems}>
+                                                {isPast ? 'No custom items for this date.' : 'No custom items yet. Click "Add item" to add one.'}
+                                            </p>
+                                        ) : (
+                                            mealPlannerOrderedItems.map((item) => (
+                                                <SortableMealPlannerRow
+                                                    key={item.id}
+                                                    item={item}
+                                                    onUpdate={handleUpdateMealPlannerDraftItem}
+                                                    onRemove={handleRemoveMealPlannerDraftItem}
+                                                    disabled={isPast}
+                                                />
+                                            ))
+                                        )}
+                                    </SortableContext>
+                                </DndContext>
+                            </div>
+                            <div className={styles.popupFooter}>
+                                {mealPlannerPopupStatus && (
+                                    <span
+                                        style={{
+                                            marginRight: 'auto',
+                                            fontSize: '0.875rem',
+                                            color: mealPlannerPopupStatus.startsWith('Error') || mealPlannerPopupStatus.includes('timed out') ? 'var(--color-danger)' : mealPlannerPopupStatus === 'Saved!' ? 'var(--color-success)' : 'var(--text-secondary)'
+                                        }}
+                                    >
+                                        {mealPlannerPopupStatus}
+                                    </span>
+                                )}
+                                {!isPast && (
+                                    <button
+                                        type="button"
+                                        className="btn btn-secondary"
+                                        onClick={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            if (window.confirm('Clear this day? All items and expiration date will be deleted.')) {
+                                                handleMealPlannerClearDay();
+                                            }
+                                        }}
+                                        disabled={mealPlannerPopupSaving}
+                                        style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginRight: 'auto', color: 'var(--color-danger)' }}
+                                        title="Delete all items and expiration for this date, then close"
+                                    >
+                                        {mealPlannerPopupSaving ? (
+                                            <Loader2 className="animate-spin" size={16} />
+                                        ) : (
+                                            <Trash2 size={16} />
+                                        )}
+                                        Clear day
+                                    </button>
+                                )}
+                                <button
+                                    type="button"
+                                    className="btn btn-secondary"
+                                    onClick={closeMealPlannerPopup}
+                                    disabled={mealPlannerPopupSaving}
+                                >
+                                    {isPast ? 'Close' : 'Cancel'}
+                                </button>
+                                {!isPast && (
+                                    <button
+                                        type="button"
+                                        className="btn btn-primary"
+                                        onClick={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            handleMealPlannerSave();
+                                        }}
+                                        disabled={mealPlannerPopupSaving}
+                                        style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                                    >
+                                        {mealPlannerPopupSaving ? (
+                                            <Loader2 className="animate-spin" size={16} />
+                                        ) : (
+                                            <Save size={16} />
+                                        )}
+                                        {mealPlannerPopupSaving ? 'Saving…' : 'Save'}
+                                    </button>
+                                )}
+                            </div>
+                                </>
+                            )}
+                                    </>
+                                );
+                            })()}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {template.serviceType === 'Boxes' && (
+                <div className={styles.formCard}>
+                    <h3 className={styles.sectionTitle}>Box Configuration</h3>
+                    <p className={styles.description}>
+                        Configure default boxes for new clients. Each box can have its own type and items.
+                    </p>
+
+                    <>
+                        {(template.boxes || []).map((box) => {
+                            const boxItems = getBoxItems();
+
+                            return (
+                                <div key={box.boxNumber} style={{
+                                    marginBottom: '1.5rem',
+                                    padding: '1rem',
+                                    background: 'var(--bg-surface)',
+                                    borderRadius: '8px',
+                                    border: '2px solid var(--border-color)'
+                                }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                                        <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 600 }}>
+                                            Box {box.boxNumber}
+                                        </h4>
+                                        {(template.boxes || []).length > 1 && (
+                                            <button
+                                                className="btn btn-secondary"
+                                                onClick={() => removeBox(box.boxNumber)}
+                                                style={{ padding: '4px 8px', fontSize: '0.8rem' }}
+                                            >
+                                                <Trash2 size={14} /> Remove
+                                            </button>
+                                        )}
+                                    </div>
+
+                                    <div style={{ marginBottom: '1rem' }}>
+                                        <label className="label" style={{ fontSize: '0.875rem', marginBottom: '0.5rem' }}>Vendor</label>
+                                        <div style={{
+                                            padding: '0.75rem',
+                                            backgroundColor: 'var(--bg-surface-hover)',
+                                            borderRadius: 'var(--radius-sm)',
+                                            border: '1px solid var(--border-color)',
+                                            fontSize: '0.9rem',
+                                            fontWeight: 500,
+                                            color: 'var(--text-primary)'
+                                        }}>
+                                            {mainVendor.name}
+                                        </div>
+                                    </div>
+
+                                    {boxItems.length > 0 && (
+                                        <div>
+                                            <label className="label" style={{ fontSize: '0.875rem', marginBottom: '0.5rem' }}>Box Contents</label>
+
+                                            {/* Show all categories with box items */}
+                                            {[...categories]
+                                                .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
+                                                .map(category => {
+                                                    const availableItems = boxItems
+                                                        .filter(i => i.categoryId === category.id)
+                                                        .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+
+                                                    if (availableItems.length === 0) return null;
+
+                                                    return (
+                                                        <div key={category.id} style={{
+                                                            marginBottom: '1rem',
+                                                            background: 'var(--bg-surface-hover)',
+                                                            padding: '0.75rem',
+                                                            borderRadius: '6px',
+                                                            border: '1px solid var(--border-color)'
+                                                        }}>
+                                                            <div style={{
+                                                                display: 'flex',
+                                                                justifyContent: 'space-between',
+                                                                marginBottom: '0.5rem',
+                                                                fontSize: '0.85rem'
+                                                            }}>
+                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                                                    <span style={{ fontWeight: 600 }}>{category.name}</span>
+                                                                    {category.setValue !== undefined && category.setValue !== null && (
+                                                                        <span style={{
+                                                                            fontSize: '0.7rem',
+                                                                            color: 'var(--color-primary)',
+                                                                            background: 'var(--bg-app)',
+                                                                            padding: '2px 6px',
+                                                                            borderRadius: '4px',
+                                                                            fontWeight: 500
+                                                                        }}>
+                                                                            Set Value: {category.setValue}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+
+                                                            <div className={styles.itemsList}>
+                                                                {availableItems.map(item => {
+                                                                    const qty = (box.items || {})[item.id] || 0;
+                                                                    return (
+                                                                        <div key={item.id} className={styles.itemRow}>
+                                                                            <div style={{ flex: 1 }}>
+                                                                                <div style={{ fontWeight: 500, marginBottom: '4px' }}>{item.name}</div>
+                                                                                <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                                                                                    Value: {item.value} | Price: ${item.priceEach || 0}
+                                                                                    {item.quotaValue && item.quotaValue > 1 && (
+                                                                                        <span style={{ marginLeft: '8px', color: 'var(--color-primary)' }}>
+                                                                                            (Counts as {item.quotaValue})
+                                                                                        </span>
+                                                                                    )}
+                                                                                </div>
+                                                                            </div>
+                                                                            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}>
+                                                                                <button
+                                                                                    className="btn btn-secondary"
+                                                                                    onClick={() => updateBoxItem(box.boxNumber, item.id, qty - 1)}
+                                                                                    disabled={qty <= 0}
+                                                                                    style={{ minWidth: '32px', padding: '4px 8px' }}
+                                                                                >
+                                                                                    -
+                                                                                </button>
+                                                                                <input
+                                                                                    type="number"
+                                                                                    className={`input ${styles.inputNumberNoSpinners}`}
+                                                                                    value={qty}
+                                                                                    onChange={e => updateBoxItem(box.boxNumber, item.id, parseInt(e.target.value) || 0)}
+                                                                                    onWheel={preventNumberInputWheelNudge}
+                                                                                    min="0"
+                                                                                    style={{ width: '80px', textAlign: 'center' }}
+                                                                                />
+                                                                                <button
+                                                                                    className="btn btn-secondary"
+                                                                                    onClick={() => updateBoxItem(box.boxNumber, item.id, qty + 1)}
+                                                                                    style={{ minWidth: '32px', padding: '4px 8px' }}
+                                                                                >
+                                                                                    +
+                                                                                </button>
+                                                                            </div>
+                                                                        </div>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+
+                                            {/* Show uncategorized items if any */}
+                                            {(() => {
+                                                const uncategorizedItems = boxItems
+                                                    .filter(i => !i.categoryId || !categories.find(c => c.id === i.categoryId))
+                                                    .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+
+                                                if (uncategorizedItems.length === 0) return null;
+
+                                                return (
+                                                    <div style={{
+                                                        marginBottom: '1rem',
+                                                        background: 'var(--bg-surface-hover)',
+                                                        padding: '0.75rem',
+                                                        borderRadius: '6px',
+                                                        border: '1px solid var(--border-color)'
+                                                    }}>
+                                                        <div style={{
+                                                            marginBottom: '0.5rem',
+                                                            fontSize: '0.85rem',
+                                                            fontWeight: 600
+                                                        }}>
+                                                            Uncategorized
+                                                        </div>
+                                                        <div className={styles.itemsList}>
+                                                            {uncategorizedItems.map(item => {
+                                                                const qty = (box.items || {})[item.id] || 0;
+                                                                return (
+                                                                    <div key={item.id} className={styles.itemRow}>
+                                                                        <div style={{ flex: 1 }}>
+                                                                            <div style={{ fontWeight: 500, marginBottom: '4px' }}>{item.name}</div>
+                                                                            <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                                                                                Value: {item.value} | Price: ${item.priceEach || 0}
+                                                                                {item.quotaValue && item.quotaValue > 1 && (
+                                                                                    <span style={{ marginLeft: '8px', color: 'var(--color-primary)' }}>
+                                                                                        (Counts as {item.quotaValue})
+                                                                                    </span>
+                                                                                )}
+                                                                            </div>
+                                                                        </div>
+                                                                        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}>
+                                                                            <button
+                                                                                className="btn btn-secondary"
+                                                                                onClick={() => updateBoxItem(box.boxNumber, item.id, qty - 1)}
+                                                                                disabled={qty <= 0}
+                                                                                style={{ minWidth: '32px', padding: '4px 8px' }}
+                                                                            >
+                                                                                -
+                                                                            </button>
+                                                                            <input
+                                                                                type="number"
+                                                                                className={`input ${styles.inputNumberNoSpinners}`}
+                                                                                value={qty}
+                                                                                onChange={e => updateBoxItem(box.boxNumber, item.id, parseInt(e.target.value) || 0)}
+                                                                                onWheel={preventNumberInputWheelNudge}
+                                                                                min="0"
+                                                                                style={{ width: '80px', textAlign: 'center' }}
+                                                                            />
+                                                                            <button
+                                                                                className="btn btn-secondary"
+                                                                                onClick={() => updateBoxItem(box.boxNumber, item.id, qty + 1)}
+                                                                                style={{ minWidth: '32px', padding: '4px 8px' }}
+                                                                            >
+                                                                                +
+                                                                            </button>
+                                                                        </div>
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })()}
+                                        </div>
+                                    )}
+
+                                    {boxItems.length === 0 && (
+                                        <div style={{
+                                            padding: '1rem',
+                                            backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                                            borderRadius: '6px',
+                                            border: '1px solid var(--color-danger)',
+                                            color: 'var(--color-danger)',
+                                            fontSize: '0.9rem'
+                                        }}>
+                                            No box items available. Box items are menu items without a vendor assigned.
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+
+                        <button
+                            className="btn btn-primary"
+                            onClick={addBox}
+                            style={{ marginTop: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                        >
+                            <Plus size={16} /> Add Another Box
+                        </button>
+                    </>
+                </div>
+            )}
+
+            {template.serviceType === 'Custom' && (
+                <div className={styles.formCard}>
+                    <h3 className={styles.sectionTitle}>Custom Order Configuration</h3>
+                    <p className={styles.description}>
+                        Configure default custom items for new clients. Custom orders allow flexible item definitions.
+                    </p>
+
+                    <div style={{ marginBottom: '1rem' }}>
+                        <label className="label">Default Vendor</label>
+                        {(() => {
+                            const vendorId = template.vendorId || '';
+                            const vendor = vendors.find(v => v.id === vendorId);
+                            const vendorName = vendor?.name || 'No vendor available';
+
+                            return (
+                                <div style={{
+                                    padding: '0.5rem 0.75rem',
+                                    backgroundColor: 'var(--bg-surface)',
+                                    border: '1px solid var(--border-color)',
+                                    borderRadius: 'var(--radius-sm)',
+                                    color: 'var(--text-primary)',
+                                    fontSize: '0.9rem'
+                                }}>
+                                    {vendorName}
+                                </div>
+                            );
+                        })()}
+                    </div>
+
+                    {template.vendorId && (
+                        <div style={{ marginTop: '1.5rem' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                                <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                    <Package size={16} /> Custom Items
+                                </h4>
+                                <button
+                                    className="btn btn-secondary"
+                                    onClick={addCustomItem}
+                                    style={{ fontSize: '0.8rem', padding: '0.375rem 0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                                >
+                                    <Plus size={14} /> Add Item
+                                </button>
+                            </div>
+
+                            {(template.customItems || []).length === 0 ? (
+                                <div style={{
+                                    padding: '1.5rem',
+                                    backgroundColor: 'var(--bg-surface-active)',
+                                    borderRadius: 'var(--radius-md)',
+                                    border: '1px dashed var(--border-color)',
+                                    color: 'var(--text-secondary)',
+                                    textAlign: 'center'
+                                }}>
+                                    <p style={{ margin: 0, fontSize: '0.9rem' }}>
+                                        No custom items added yet. Click "Add Item" to add custom order items.
+                                    </p>
+                                </div>
+                            ) : (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                                    {(template.customItems || []).map((item, index) => (
+                                        <div
+                                            key={index}
+                                            style={{
+                                                padding: '0.75rem',
+                                                backgroundColor: 'var(--bg-surface-hover)',
+                                                borderRadius: 'var(--radius-sm)',
+                                                border: '1px solid var(--border-color)',
+                                                display: 'flex',
+                                                gap: '0.5rem',
+                                                alignItems: 'flex-start'
+                                            }}
+                                        >
+                                            <div style={{ flex: 1 }}>
+                                                <label className="label" style={{ fontSize: '0.8rem', marginBottom: '0.25rem' }}>Item Name</label>
+                                                <input
+                                                    className="input"
+                                                    value={item.name || ''}
+                                                    onChange={e => updateCustomItem(index, 'name', e.target.value)}
+                                                    placeholder="Enter item name"
+                                                    style={{ fontSize: '0.9rem' }}
+                                                />
+                                            </div>
+                                            <div style={{ width: '120px' }}>
+                                                <label className="label" style={{ fontSize: '0.8rem', marginBottom: '0.25rem' }}>Price</label>
+                                                <input
+                                                    type="number"
+                                                    step="0.01"
+                                                    className={`input ${styles.inputNumberNoSpinners}`}
+                                                    value={item.price || 0}
+                                                    onChange={e => updateCustomItem(index, 'price', e.target.value)}
+                                                    onWheel={preventNumberInputWheelNudge}
+                                                    placeholder="0.00"
+                                                    style={{ fontSize: '0.9rem' }}
+                                                />
+                                            </div>
+                                            <div style={{ width: '100px' }}>
+                                                <label className="label" style={{ fontSize: '0.8rem', marginBottom: '0.25rem' }}>Quantity</label>
+                                                <input
+                                                    type="number"
+                                                    min="1"
+                                                    className={`input ${styles.inputNumberNoSpinners}`}
+                                                    value={item.quantity || 1}
+                                                    onChange={e => updateCustomItem(index, 'quantity', e.target.value)}
+                                                    onWheel={preventNumberInputWheelNudge}
+                                                    style={{ fontSize: '0.9rem' }}
+                                                />
+                                            </div>
+                                            <button
+                                                className="btn btn-secondary"
+                                                onClick={() => removeCustomItem(index)}
+                                                style={{ marginTop: '1.5rem', padding: '4px 8px' }}
+                                                title="Remove Item"
+                                            >
+                                                <Trash2 size={16} />
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {template.serviceType === 'Produce' && (
+                <div className={styles.formCard}>
+                    <h3 className={styles.sectionTitle}>Produce Order Configuration</h3>
+                    <p className={styles.description}>
+                        Configure the default bill amount for produce orders for new clients.
+                    </p>
+
+                    <div style={{ marginBottom: '1rem' }}>
+                        <label className="label">Bill Amount</label>
+                        <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            className={`input ${styles.inputNumberNoSpinners}`}
+                            value={template.billAmount || 0}
+                            onChange={e => setTemplate({
+                                ...template,
+                                billAmount: parseFloat(e.target.value) || 0
+                            })}
+                            onWheel={preventNumberInputWheelNudge}
+                            placeholder="0.00"
+                            style={{ maxWidth: '300px' }}
+                        />
+                        <p style={{
+                            fontSize: '0.875rem',
+                            color: 'var(--text-secondary)',
+                            marginTop: '0.5rem'
+                        }}>
+                            Enter the default bill amount for produce orders.
+                        </p>
+                    </div>
+                </div>
+            )}
+
+            {template.serviceType !== 'Food' && (
+                <div style={{ marginTop: 'var(--spacing-xl)', paddingTop: 'var(--spacing-lg)', borderTop: '1px solid var(--border-color)' }}>
+                    <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+                        {saving ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}
+                        {saving ? 'Saving...' : 'Save Template'}
+                    </button>
+                </div>
+            )}
+        </div>
+    );
+}
