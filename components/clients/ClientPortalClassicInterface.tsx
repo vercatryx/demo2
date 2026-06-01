@@ -1002,12 +1002,34 @@ export function ClientPortalClassicInterface({
                     ? 'Saving automatically…'
                     : 'Saved';
 
+    const saveBarRef = useRef<HTMLDivElement>(null);
+    const [saveBarInsetPx, setSaveBarInsetPx] = useState(88);
+
+    useEffect(() => {
+        const el = saveBarRef.current;
+        if (!el) return;
+        const update = () => setSaveBarInsetPx(el.offsetHeight);
+        update();
+        const ro = new ResizeObserver(update);
+        ro.observe(el);
+        return () => ro.disconnect();
+    }, [saveBarShowsIssue, validationStatus.error, saving, saveError, configChanged]);
+
+    const portalChromeStyle = {
+        flex: 1,
+        minHeight: 0,
+        height: '100%',
+        ['--client-portal-save-bar-inset' as string]: `${saveBarInsetPx}px`,
+    } as React.CSSProperties;
+
+    const saveBarExpanded = saveBarShowsIssue && !!validationStatus.error;
+
     return (
-        <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <PassoverWarningBanner />
             <div
-                className={`${stylesClientPortal.portalContainer} ${stylesClientPortal.saveBarVisible}`}
-                style={{ flex: 1, minHeight: 0, height: '100%' }}
+                className={`${stylesClientPortal.portalContainer} ${stylesClientPortal.saveBarVisible}${saveBarExpanded ? ` ${stylesClientPortal.saveBarIssueExpanded}` : ''}`}
+                style={portalChromeStyle}
             >
             {/* Left Sidebar */}
             <ClientPortalSidebar client={client} serviceType={serviceType} />
@@ -1126,6 +1148,7 @@ export function ClientPortalClassicInterface({
                         </div>
                     )}
 
+                    <div style={{ height: saveBarInsetPx, flexShrink: 0 }} aria-hidden />
 
                 </div>
             </div>
@@ -1150,6 +1173,7 @@ export function ClientPortalClassicInterface({
                     }
                 `}</style>
                 <div
+                    ref={saveBarRef}
                     className="save-bar-container"
                     style={{
                         position: 'fixed',

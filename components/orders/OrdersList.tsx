@@ -1,16 +1,19 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
+import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { Search, ChevronRight, ArrowUpDown, Trash2, Loader2, ChevronLeft } from 'lucide-react';
 import { getOrdersPaginatedBilling, deleteOrder } from '@/lib/actions-orders-billing';
 import { toCalendarDateKeyInAppTz, formatScheduledDeliveryDateForOrdersUi } from '@/lib/timezone';
 import { LoadingIndicator } from '@/components/ui/LoadingIndicator';
+import { OrderDetailShelf } from './OrderDetailShelf';
 import styles from './OrdersList.module.css';
 
-export function OrdersList({ userRole = '' }: { userRole?: string }) {
+export function OrdersList({ userRole = '', showDelete = true }: { userRole?: string; showDelete?: boolean }) {
     const router = useRouter();
+    const pathname = usePathname();
+    const searchParams = useSearchParams();
+    const selectedOrderId = searchParams.get('order');
     const isBrooklynAdmin = userRole === 'brooklyn_admin';
     const PAGE_SIZE_OPTIONS = [50, 100, 250, 500] as const;
     const [orders, setOrders] = useState<any[]>([]);
@@ -111,6 +114,19 @@ export function OrdersList({ userRole = '' }: { userRole?: string }) {
         setSelectedOrders(
             selectedOrders.size === filteredOrders.length ? new Set() : new Set(filteredOrders.map((o) => o.id))
         );
+    };
+
+    const openOrder = (orderId: string) => {
+        const params = new URLSearchParams(searchParams.toString());
+        params.set('order', orderId);
+        router.push(`${pathname}?${params.toString()}`, { scroll: false });
+    };
+
+    const closeOrder = () => {
+        const params = new URLSearchParams(searchParams.toString());
+        params.delete('order');
+        const q = params.toString();
+        router.push(q ? `${pathname}?${q}` : pathname, { scroll: false });
     };
 
     const handleDeleteSelected = async () => {
@@ -283,14 +299,21 @@ export function OrdersList({ userRole = '' }: { userRole?: string }) {
                     <span style={{ width: '40px' }} />
                 </div>
                 {filteredOrders.map((order, index) => (
-                    <div key={order.id} className={styles.row}>
-                        <Link
-                            href={`/orders/${order.id}`}
-                            className={styles.rowLinkOverlay}
-                            aria-label={`Open order ${order.order_number ?? order.id}`}
-                        >
-                            <span className={styles.srOnly}>Open</span>
-                        </Link>
+                    <div
+                        key={order.id}
+                        className={`${styles.row} ${selectedOrderId === order.id ? styles.rowSelected : ''}`}
+                        onClick={() => openOrder(order.id)}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                openOrder(order.id);
+                            }
+                        }}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Open order ${order.order_number ?? order.id}`}
+                        aria-current={selectedOrderId === order.id ? 'true' : undefined}
+                    >
                         <span
                             className={styles.checkboxCell}
                             style={{ width: '50px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
@@ -401,6 +424,15 @@ export function OrdersList({ userRole = '' }: { userRole?: string }) {
                     </div>
                 );
             })()}
+
+            {selectedOrderId && (
+                <OrderDetailShelf
+                    orderId={selectedOrderId}
+                    showDelete={showDelete}
+                    onClose={closeOrder}
+                    onDeleted={() => loadData(page)}
+                />
+            )}
         </div>
     );
 }

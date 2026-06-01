@@ -10,7 +10,10 @@ export default async function OrdersPage() {
     const session = await verifySession();
     return (
         <main style={{ padding: '2rem' }}>
-            <OrdersList userRole={session?.role ?? ''} />
+            <OrdersList
+                userRole={session?.role ?? ''}
+                showDelete={session?.role !== 'brooklyn_admin'}
+            />
         </main>
     );
 }

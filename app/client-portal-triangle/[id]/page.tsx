@@ -117,10 +117,22 @@ export default async function ClientPortalTrianglePage({ params }: Props) {
     session.role === 'super-admin';
 
   const portalInterface = (
-    <div style={{ padding: '20px' }}>
-      <div style={{ marginBottom: '12px', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-        Classic portal (upcoming-order / vendor selection)
-      </div>
+    <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      {session.role !== 'client' ? (
+        <div
+          style={{
+            flexShrink: 0,
+            padding: '8px 16px',
+            fontSize: '0.85rem',
+            color: 'var(--text-secondary)',
+            borderBottom: '1px solid var(--border-color)',
+            background: 'var(--bg-surface)',
+          }}
+        >
+          Classic portal (upcoming-order / vendor selection)
+        </div>
+      ) : null}
+      <div style={{ flex: 1, minHeight: 0 }}>
       <ClientPortalClassicInterface
         client={client}
         statuses={statuses}
@@ -138,6 +150,7 @@ export default async function ClientPortalTrianglePage({ params }: Props) {
         boxOrders={[]}
         canManageFoodKitchenVendor={canManageFoodKitchenVendor}
       />
+      </div>
     </div>
   );
 

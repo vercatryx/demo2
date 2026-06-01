@@ -39,8 +39,8 @@ export function LayoutShell({ children, userName, userRole, userId }: { children
     const isRoutes = pathname === '/routes' || pathname.startsWith('/routes/');
     const showSidebar = !isVendorPortal && !isClientPortal && !isVerifyOrder && !isDelivery && !isDrivers && !isProduce;
 
-    // Adjust padding for routes page: remove top and right padding
-    const mainPadding = isRoutes ? '0 0 0 20px' : '2rem 20px 0 20px';
+    // Adjust padding for routes page: remove top and right padding; client portals are full-bleed
+    const mainPadding = isRoutes ? '0 0 0 20px' : isClientPortal ? '0' : '2rem 20px 0 20px';
 
     return (
         <DataCacheProvider>

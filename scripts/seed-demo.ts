@@ -24,6 +24,7 @@ import {
 import { createPgSeedDb, type SeedDb } from './seed-db';
 import { compileFinalPrompt } from '../lib/ai/compile-prompt';
 import { seedAiUsageData } from '../lib/demo-seed-ai-usage';
+import { demoProofUrl } from '../lib/demo-proof-urls';
 
 type DemoSeedDb = SupabaseClient | SeedDb;
 
@@ -106,8 +107,6 @@ const DRIVERS_PER_DAY = ROUTE_ZONES.length;
 const STOPS_PER_DRIVER = 32;
 const PENDING_SCREENING_COUNT = 28;
 const ORDER_HISTORY_COUNT = 500;
-const DEMO_PROOF_URL = 'https://placehold.co/120x120/png?text=Delivered';
-
 function pickBillingOrderMeta(i: number): {
   status: string;
   proof: string | null;
@@ -117,20 +116,21 @@ function pickBillingOrderMeta(i: number): {
 } {
   const sched = daysAgo(i % 14);
   const bucket = i % 10;
+  const proof = demoProofUrl(i);
   if (bucket < 3) {
     return {
       status: 'billing_successful',
-      proof: DEMO_PROOF_URL,
+      proof,
       sched,
       actual: sched,
       billed: true,
     };
   }
   if (bucket < 5) {
-    return { status: 'billing_pending', proof: DEMO_PROOF_URL, sched, actual: sched, billed: false };
+    return { status: 'billing_pending', proof, sched, actual: sched, billed: false };
   }
   if (bucket < 7) {
-    return { status: 'completed', proof: DEMO_PROOF_URL, sched, actual: sched, billed: bucket < 6 };
+    return { status: 'completed', proof, sched, actual: sched, billed: bucket < 6 };
   }
   if (bucket < 8) {
     return { status: 'delivered', proof: null, sched, actual: sched, billed: false };

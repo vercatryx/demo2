@@ -36,10 +36,21 @@ interface OrderDetailViewProps {
     order: OrderDetail;
     /** When false, hides delete (e.g. Brooklyn admins). */
     showDelete?: boolean;
+    /** Page layout (default) or right-hand shelf panel. */
+    variant?: 'page' | 'shelf';
+    onClose?: () => void;
+    onDeleted?: () => void;
 }
 
-export function OrderDetailView({ order, showDelete = true }: OrderDetailViewProps) {
+export function OrderDetailView({
+    order,
+    showDelete = true,
+    variant = 'page',
+    onClose,
+    onDeleted,
+}: OrderDetailViewProps) {
     const router = useRouter();
+    const isShelf = variant === 'shelf';
     const [isDeleting, setIsDeleting] = useState(false);
     const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
 
@@ -124,8 +135,11 @@ export function OrderDetailView({ order, showDelete = true }: OrderDetailViewPro
         setIsDeleting(true);
         try {
             const result = await deleteOrder(order.id);
-            if (result.success) router.push('/orders');
-            else alert(`Failed: ${result.message}`);
+            if (result.success) {
+                onDeleted?.();
+                if (isShelf) onClose?.();
+                else router.push('/orders');
+            } else alert(`Failed: ${result.message}`);
         } catch (e) {
             console.error(e);
             alert('Error deleting order.');
@@ -236,24 +250,33 @@ export function OrderDetailView({ order, showDelete = true }: OrderDetailViewPro
     };
 
     return (
-        <div className={styles.container}>
-            <button type="button" className={styles.backBtn} onClick={() => router.push('/orders')}>
-                <ArrowLeft size={20} /> Back to Orders
-            </button>
-            <div className={styles.header}>
-                <div>
-                    <h1 className={styles.title}>Order #{order.orderNumber ?? 'N/A'}</h1>
+        <div className={isShelf ? styles.containerShelf : styles.container}>
+            {!isShelf && (
+                <button type="button" className={styles.backBtn} onClick={() => router.push('/orders')}>
+                    <ArrowLeft size={20} /> Back to Orders
+                </button>
+            )}
+            <div className={isShelf ? styles.headerShelf : styles.header}>
+                <div className={isShelf ? styles.headerShelfTitle : undefined}>
+                    <h1 className={isShelf ? styles.titleShelf : styles.title}>Order #{order.orderNumber ?? 'N/A'}</h1>
                     <div className={styles.statusBadge}>
                         <span className={getStatusStyle(order.status)}>{formatStatus(order.status)}</span>
                     </div>
                 </div>
-                {showDelete && (
-                    <button type="button" className={styles.deleteBtn} onClick={handleDelete} disabled={isDeleting}>
-                        {isDeleting ? <><Loader2 size={18} className="animate-spin" /> Deleting...</> : <><Trash2 size={18} /> Delete Order</>}
-                    </button>
-                )}
+                <div className={styles.headerActions}>
+                    {showDelete && (
+                        <button type="button" className={styles.deleteBtn} onClick={handleDelete} disabled={isDeleting}>
+                            {isDeleting ? <><Loader2 size={18} className="animate-spin" /> Deleting...</> : <><Trash2 size={18} /> Delete Order</>}
+                        </button>
+                    )}
+                    {isShelf && onClose && (
+                        <button type="button" className={styles.shelfCloseBtn} onClick={onClose} aria-label="Close order details">
+                            <X size={22} />
+                        </button>
+                    )}
+                </div>
             </div>
-            <div className={styles.content}>
+            <div className={isShelf ? styles.contentShelf : styles.content}>
                 <div className={styles.sections}>
                     <div className={styles.section}>
                         <div className={styles.sectionHeader}><User size={20} /><h2>Client Information</h2></div>

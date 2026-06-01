@@ -16,7 +16,7 @@ export default function ClientPortalSidebar({ client, serviceType: effectiveServ
     const serviceType = effectiveServiceType ?? client.serviceType;
     return (
         <div className={styles.sidebarColumn} style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-            <div style={{ padding: '24px', flex: 1, overflowY: 'auto' }}>
+            <div className={styles.sidebarScroll} style={{ padding: '24px', flex: 1, overflowY: 'auto' }}>
                 {/* Header / Avatar */}
                 <div style={{ marginBottom: '32px', textAlign: 'center' }}>
                     <div style={{

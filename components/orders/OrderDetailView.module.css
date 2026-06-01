@@ -2,6 +2,75 @@
 
 .container { padding: 1rem; max-width: 1400px; margin: 0; }
 
+.containerShelf {
+    padding: 0;
+    max-width: none;
+    margin: 0;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.headerShelf {
+    margin-bottom: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    padding: 1rem 1rem 0.75rem;
+    border-bottom: 1px solid var(--border-color, #ddd);
+    flex-shrink: 0;
+    position: sticky;
+    top: 0;
+    background: var(--bg-panel, #fff);
+    z-index: 2;
+}
+
+.headerShelfTitle {
+    min-width: 0;
+    flex: 1;
+}
+
+.titleShelf {
+    font-size: 1.35rem;
+    font-weight: 600;
+    color: var(--text-primary, #111);
+    margin-bottom: 0.5rem;
+}
+
+.headerActions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-shrink: 0;
+}
+
+.shelfCloseBtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.5rem;
+    height: 2.5rem;
+    padding: 0;
+    border-radius: 0.5rem;
+    border: 1px solid var(--border-color, #ddd);
+    background: transparent;
+    color: var(--text-primary, #111);
+    cursor: pointer;
+}
+
+.shelfCloseBtn:hover {
+    background: var(--bg-surface, #f5f5f5);
+}
+
+.contentShelf {
+    margin-top: 0;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0 1rem 1.5rem;
+}
+
 .backBtn {
     display: flex; align-items: center; gap: 0.5rem;
     padding: 0.5rem 1rem; background: transparent; border: 1px solid var(--border-color, #ddd);
@@ -97,7 +166,7 @@
 .lightboxOverlay {
     position: fixed;
     inset: 0;
-    z-index: 1000;
+    z-index: 1100;
     background: rgba(0, 0, 0, 0.9);
     display: flex;
     align-items: center;
