@@ -11,6 +11,16 @@ const CASE_URL_INCORRECT_HINT =
 let config = { baseUrl: DEFAULT_BASE, apiKey: '' };
 let statuses = [];
 let navigators = [];
+let currentMode = 'add-clients';
+let lastLoadedSourceKey = '';
+let selectedClientId = '';
+let ordersLoadInFlight = false;
+let addClientsInitialized = false;
+let clientSearchTimeout = null;
+let clientSearchSeq = 0;
+let lastAutoDetectedPageKey = '';
+
+const MODE_STORAGE_KEY = 'extensionMode';
 
 function getConfig() {
     return {
@@ -23,10 +33,253 @@ function isBrooklynOnlyMode() {
     return BROOKLYN_ONLY;
 }
 
+function getUniteAccountQueryParam() {
+    const v = getUniteAccountValue();
+    if (v === 'Brooklyn' || v === 'Regular') return v;
+    return null;
+}
+
+function buildUniteAccountQueryString() {
+    const ua = getUniteAccountQueryParam();
+    return ua ? `&uniteAccount=${encodeURIComponent(ua)}` : '';
+}
+
 function getUniteAccountValue() {
     if (isBrooklynOnlyMode()) return 'Brooklyn';
     const sel = document.getElementById('unite-account');
     return sel ? sel.value : 'Regular';
+}
+
+function updateOrdersContextUi(tabUrl) {
+    const urlEl = document.getElementById('orders-case-url');
+    const trimmed = (tabUrl || '').trim();
+    if (!urlEl) return;
+
+    if (isValidCaseUrl(trimmed)) {
+        urlEl.textContent = `Unite Us link detected: ${trimmed}`;
+    } else if (trimmed && trimmed.includes('uniteus.io')) {
+        urlEl.textContent = 'Unite Us page detected — client name will auto-fill from Client Details when available.';
+    } else if (trimmed) {
+        urlEl.textContent = 'Not on a Unite Us case page — search for a client below.';
+    } else {
+        urlEl.textContent = isBrooklynOnlyMode()
+            ? 'Search for a Brooklyn client below, or open their Unite Us case page.'
+            : 'Search for a client below, or open a Unite Us case page.';
+    }
+}
+
+function hideSearchResults() {
+    const resultsEl = document.getElementById('orders-search-results');
+    if (resultsEl) {
+        resultsEl.style.display = 'none';
+        resultsEl.innerHTML = '';
+    }
+}
+
+async function searchClientsApi({ q = '', externalId = '' } = {}) {
+    const { baseUrl, apiKey } = getConfig();
+    if (!apiKey || !baseUrl) {
+        throw new Error('Configure Base URL and API key in Settings.');
+    }
+
+    const params = new URLSearchParams({ limit: '30' });
+    if (q) params.set('q', q);
+    if (externalId) params.set('externalId', externalId);
+    const ua = getUniteAccountQueryParam();
+    if (ua) params.set('uniteAccount', ua);
+
+    const response = await fetch(`${baseUrl}/api/extension/client-search?${params.toString()}`, {
+        method: 'GET',
+        headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+        },
+    });
+
+    const contentType = response.headers.get('content-type');
+    if (!contentType || !contentType.includes('application/json')) {
+        throw new Error('Invalid search response.');
+    }
+
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Search failed.');
+    }
+
+    return data.clients || [];
+}
+
+function pickBestClientMatch(clients, preferredName) {
+    if (!clients?.length) return null;
+    if (clients.length === 1) return clients[0];
+
+    const norm = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const target = norm(preferredName);
+    if (target) {
+        const exact = clients.find((c) => norm(c.fullName) === target);
+        if (exact) return exact;
+        const starts = clients.find((c) => norm(c.fullName).startsWith(target));
+        if (starts) return starts;
+    }
+
+    return null;
+}
+
+async function extractPageClientHintsFromTab() {
+    try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab?.id) return null;
+
+        const response = await chrome.runtime.sendMessage({
+            action: 'extractPageClientHints',
+            tabId: tab.id,
+        });
+
+        if (!response?.success || !response.data) return null;
+        const clientName = (response.data.clientName || '').trim();
+        const clientExternalId = (response.data.clientExternalId || '').trim();
+        if (!clientName && !clientExternalId) return null;
+        return { clientName, clientExternalId };
+    } catch (_) {
+        return null;
+    }
+}
+
+async function tryPrepopulateFromPage(force) {
+    const hints = await extractPageClientHintsFromTab();
+    if (!hints) return false;
+
+    const { clientName, clientExternalId } = hints;
+    const pageKey = `${clientExternalId}|${clientName}`;
+    if (!force && pageKey === lastAutoDetectedPageKey && selectedClientId) {
+        return true;
+    }
+
+    const searchInput = document.getElementById('orders-client-search');
+    let clients = [];
+
+    try {
+        if (clientExternalId) {
+            clients = await searchClientsApi({ externalId: clientExternalId });
+        }
+        if (!clients.length && clientName.length >= 2) {
+            clients = await searchClientsApi({ q: clientName });
+        }
+    } catch (error) {
+        if (searchInput && clientName) searchInput.value = clientName;
+        showOrdersStatus(error.message || 'Search failed.', 'error');
+        lastAutoDetectedPageKey = pageKey;
+        return true;
+    }
+
+    if (searchInput && clientName) {
+        searchInput.value = clientName;
+    }
+
+    lastAutoDetectedPageKey = pageKey;
+
+    if (!clients.length) {
+        showOrdersSearchPrompt();
+        showOrdersStatus(
+            clientName
+                ? `No matching client found for "${clientName}".`
+                : `No matching client found for ID ${clientExternalId}.`,
+            'error'
+        );
+        return true;
+    }
+
+    const best = pickBestClientMatch(clients, clientName);
+    if (best) {
+        if (searchInput) searchInput.value = best.fullName;
+        hideSearchResults();
+        selectedClientId = best.id;
+        await loadOrdersFromApi({ clientId: best.id, force: true });
+        return true;
+    }
+
+    renderSearchResults(clients);
+    showOrdersStatus(
+        `${clients.length} matches for "${clientName || clientExternalId}" — select one.`,
+        'info'
+    );
+    return true;
+}
+
+function renderSearchResults(clients) {
+    const resultsEl = document.getElementById('orders-search-results');
+    if (!resultsEl) return;
+
+    if (!clients || clients.length === 0) {
+        resultsEl.innerHTML = '<div class="orders-search-empty">No matching clients found.</div>';
+        resultsEl.style.display = 'block';
+        return;
+    }
+
+    resultsEl.innerHTML = clients.map((client) => {
+        const meta = [client.serviceType, client.phoneNumber].filter(Boolean).join(' · ');
+        return `
+            <button type="button" class="orders-search-result" data-client-id="${escapeHtml(client.id)}">
+                <div class="orders-search-result-name">${escapeHtml(client.fullName)}</div>
+                ${meta ? `<div class="orders-search-result-meta">${escapeHtml(meta)}</div>` : ''}
+            </button>
+        `;
+    }).join('');
+
+    resultsEl.style.display = 'block';
+    resultsEl.querySelectorAll('.orders-search-result').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const id = btn.getAttribute('data-client-id');
+            const name = btn.querySelector('.orders-search-result-name')?.textContent || '';
+            if (!id) return;
+            selectedClientId = id;
+            const input = document.getElementById('orders-client-search');
+            if (input) input.value = name;
+            hideSearchResults();
+            loadOrdersFromApi({ clientId: id, force: true });
+        });
+    });
+}
+
+async function handleClientSearchInput() {
+    const input = document.getElementById('orders-client-search');
+    const resultsEl = document.getElementById('orders-search-results');
+    if (!input || !resultsEl) return;
+
+    const q = input.value.trim();
+    clearTimeout(clientSearchTimeout);
+
+    if (q.length < 2) {
+        hideSearchResults();
+        return;
+    }
+
+    clientSearchTimeout = setTimeout(async () => {
+        const seq = ++clientSearchSeq;
+        resultsEl.innerHTML = '<div class="orders-search-empty">Searching…</div>';
+        resultsEl.style.display = 'block';
+
+        try {
+            const clients = await searchClientsApi({ q });
+            if (seq !== clientSearchSeq) return;
+            renderSearchResults(clients);
+        } catch (error) {
+            if (seq !== clientSearchSeq) return;
+            resultsEl.innerHTML = `<div class="orders-search-empty">${escapeHtml(error.message || 'Search failed.')}</div>`;
+            resultsEl.style.display = 'block';
+        }
+    }, 300);
+}
+
+function showOrdersSearchPrompt() {
+    const clientCard = document.getElementById('orders-client-card');
+    const list = document.getElementById('orders-list');
+    if (clientCard) clientCard.style.display = 'none';
+    if (list) {
+        list.innerHTML = '<div class="orders-empty">Search for a client by name to view their orders and delivery proof.</div>';
+    }
+    const statusEl = document.getElementById('orders-status');
+    if (statusEl) statusEl.style.display = 'none';
 }
 
 /** Brooklyn-only: blue theme, Unite fixed to Brooklyn (no dropdown). */
@@ -79,8 +332,10 @@ function getSubmitMissingReasons() {
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
     await loadConfig();
+    await loadSavedMode();
     await validateAndInitialize();
     setupEventListeners();
+    setupTabUrlListener();
 });
 
 // Load configuration from storage (with migration from old multi-connection keys)
@@ -114,16 +369,340 @@ async function loadConfig() {
     applyBrooklynOnlyUi();
 }
 
+async function loadSavedMode() {
+    try {
+        const result = await chrome.storage.sync.get([MODE_STORAGE_KEY]);
+        if (result[MODE_STORAGE_KEY] === 'review-orders' || result[MODE_STORAGE_KEY] === 'add-clients') {
+            currentMode = result[MODE_STORAGE_KEY];
+        }
+    } catch (_) {
+        // ignore
+    }
+}
+
+function applyModeUi() {
+    const formSection = document.getElementById('form-section');
+    const ordersSection = document.getElementById('orders-section');
+    const addBtn = document.getElementById('mode-add-clients');
+    const reviewBtn = document.getElementById('mode-review-orders');
+    const title = document.getElementById('panel-title');
+    const isReview = currentMode === 'review-orders';
+
+    if (formSection) formSection.style.display = isReview ? 'none' : 'block';
+    if (ordersSection) ordersSection.style.display = isReview ? 'flex' : 'none';
+    if (title) title.textContent = isReview ? 'Review Orders' : 'Add New Client';
+
+    if (addBtn) {
+        addBtn.classList.toggle('mode-btn-active', !isReview);
+        addBtn.setAttribute('aria-selected', !isReview ? 'true' : 'false');
+    }
+    if (reviewBtn) {
+        reviewBtn.classList.toggle('mode-btn-active', isReview);
+        reviewBtn.setAttribute('aria-selected', isReview ? 'true' : 'false');
+    }
+}
+
+async function ensureAddClientsReady() {
+    if (addClientsInitialized) return;
+    addClientsInitialized = true;
+    await loadStatuses();
+    await loadNavigators();
+    await loadProduceVendorOptions();
+    setupFormValidation();
+    setupAutoGeocode();
+    setupManualGeocode();
+}
+
+async function setMode(mode) {
+    if (mode !== 'add-clients' && mode !== 'review-orders') return;
+    currentMode = mode;
+    applyModeUi();
+    try {
+        await chrome.storage.sync.set({ [MODE_STORAGE_KEY]: mode });
+    } catch (_) {
+        // ignore
+    }
+
+    if (mode === 'review-orders') {
+        await loadOrdersForCurrentTab(true);
+    } else {
+        await ensureAddClientsReady();
+    }
+}
+
+function setupTabUrlListener() {
+    chrome.runtime.onMessage.addListener((message) => {
+        if (message?.action === 'tabUrlChanged' && currentMode === 'review-orders') {
+            handleReviewOrdersTabChange(message.url);
+        }
+    });
+}
+
+async function handleReviewOrdersTabChange(tabUrl) {
+    updateOrdersContextUi(tabUrl);
+    if (isValidCaseUrl(tabUrl)) {
+        selectedClientId = '';
+        lastAutoDetectedPageKey = '';
+        const searchInput = document.getElementById('orders-client-search');
+        if (searchInput) searchInput.value = '';
+        hideSearchResults();
+        await loadOrdersFromApi({ caseUrl: tabUrl, force: false });
+        return;
+    }
+
+    selectedClientId = '';
+    lastLoadedSourceKey = '';
+    await tryPrepopulateFromPage(false);
+}
+
+function formatOrderDate(iso) {
+    if (!iso) return '—';
+    try {
+        const d = new Date(iso.length <= 10 ? `${iso}T12:00:00` : iso);
+        return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+    } catch (_) {
+        return iso;
+    }
+}
+
+function formatStatusLabel(status) {
+    if (!status) return 'Unknown';
+    return String(status).replace(/_/g, ' ');
+}
+
+function statusClassName(status) {
+    const s = String(status || '').toLowerCase();
+    if (s === 'completed' || s === 'billing_pending') return 'order-status-completed';
+    if (s === 'pending' || s === 'scheduled') return 'order-status-pending';
+    if (s === 'cancelled' || s === 'canceled') return 'order-status-cancelled';
+    return 'order-status-other';
+}
+
+function isImageProofUrl(url) {
+    if (!url) return false;
+    return /\.(jpe?g|png|gif|webp|bmp)(\?|$)/i.test(url) || url.includes('/storage/v1/object/');
+}
+
+function renderProofSection(order) {
+    const urls = (order.proofUrls && order.proofUrls.length)
+        ? order.proofUrls
+        : (order.proofUrl ? [order.proofUrl] : []);
+
+    if (!urls.length) {
+        return '<div class="order-proof"><div class="order-proof-label">Proof of delivery</div><div class="order-proof-missing">No proof attached</div></div>';
+    }
+
+    const parts = urls.map((url, idx) => {
+        const safeUrl = escapeHtml(url);
+        const label = urls.length > 1 ? `Proof ${idx + 1}` : 'Proof of delivery';
+        if (isImageProofUrl(url)) {
+            return `<div class="order-proof"><div class="order-proof-label">${label}</div><a href="${safeUrl}" target="_blank" rel="noopener noreferrer"><img class="order-proof-thumb" src="${safeUrl}" alt="Delivery proof"></a></div>`;
+        }
+        return `<div class="order-proof"><div class="order-proof-label">${label}</div><a class="order-proof-link" href="${safeUrl}" target="_blank" rel="noopener noreferrer">Open proof</a></div>`;
+    });
+
+    return parts.join('');
+}
+
+function escapeHtml(text) {
+    return String(text ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+function renderClientCard(client, dependentCount) {
+    const card = document.getElementById('orders-client-card');
+    if (!card) return;
+
+    const flags = [];
+    if (client.paused) flags.push('Paused');
+    if (client.bill === false) flags.push('No bill');
+    if (client.delivery === false) flags.push('No delivery');
+
+    card.innerHTML = `
+        <h2>${escapeHtml(client.fullName || 'Unknown client')}</h2>
+        <div class="orders-client-meta">
+            <span>Service: ${escapeHtml(client.serviceType || '—')}</span>
+            ${client.phoneNumber ? `<span>Phone: ${escapeHtml(client.phoneNumber)}</span>` : ''}
+            ${dependentCount > 0 ? `<span>Dependents: ${dependentCount}</span>` : ''}
+            ${flags.length ? `<span>${escapeHtml(flags.join(' · '))}</span>` : ''}
+        </div>
+    `;
+    card.style.display = 'block';
+}
+
+function renderOrdersList(orders) {
+    const list = document.getElementById('orders-list');
+    if (!list) return;
+
+    if (!orders || orders.length === 0) {
+        list.innerHTML = '<div class="orders-empty">No orders found for this client.</div>';
+        return;
+    }
+
+    list.innerHTML = orders.map((order) => {
+        const dateLabel = formatOrderDate(order.actualDeliveryDate || order.scheduledDeliveryDate || order.createdAt);
+        const orderLabel = order.orderNumber != null ? `#${order.orderNumber}` : 'Order';
+        const clientLine = order.clientName ? `<span>${escapeHtml(order.clientName)}</span>` : '';
+
+        return `
+            <article class="order-card">
+                <div class="order-card-header">
+                    <div class="order-card-title">${escapeHtml(orderLabel)} · ${escapeHtml(order.serviceType || '—')}</div>
+                    <div class="order-card-date">${escapeHtml(dateLabel)}</div>
+                </div>
+                <div class="order-card-details">
+                    <span class="order-status ${statusClassName(order.status)}">${escapeHtml(formatStatusLabel(order.status))}</span>
+                    ${clientLine}
+                </div>
+                ${renderProofSection(order)}
+            </article>
+        `;
+    }).join('');
+}
+
+function showOrdersStatus(message, type) {
+    showStatus('orders-status', message, type);
+}
+
+async function getActiveTabUrl() {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    return tab?.url || '';
+}
+
+async function loadOrdersForCurrentTab(force) {
+    const tabUrl = await getActiveTabUrl();
+    updateOrdersContextUi(tabUrl);
+
+    if (isValidCaseUrl(tabUrl)) {
+        selectedClientId = '';
+        lastAutoDetectedPageKey = '';
+        const searchInput = document.getElementById('orders-client-search');
+        if (searchInput) searchInput.value = '';
+        hideSearchResults();
+        await loadOrdersFromApi({ caseUrl: tabUrl, force });
+        return;
+    }
+
+    if (await tryPrepopulateFromPage(force)) {
+        return;
+    }
+
+    if (selectedClientId) {
+        await loadOrdersFromApi({ clientId: selectedClientId, force });
+        return;
+    }
+
+    showOrdersSearchPrompt();
+}
+
+async function loadOrdersFromApi({ caseUrl = '', clientId = '', force = false } = {}) {
+    const refreshBtn = document.getElementById('orders-refresh-btn');
+    const clientCard = document.getElementById('orders-client-card');
+    const list = document.getElementById('orders-list');
+
+    if (currentMode !== 'review-orders') return;
+
+    const sourceKey = clientId ? `id:${clientId}` : `url:${(caseUrl || '').trim()}`;
+    if (!sourceKey || sourceKey === 'url:') {
+        showOrdersSearchPrompt();
+        return;
+    }
+
+    if (!force && sourceKey === lastLoadedSourceKey) return;
+    if (ordersLoadInFlight) return;
+
+    const { baseUrl, apiKey } = getConfig();
+    if (!apiKey || !baseUrl) {
+        showOrdersStatus('Configure Base URL and API key in Settings.', 'error');
+        return;
+    }
+
+    ordersLoadInFlight = true;
+    if (refreshBtn) {
+        refreshBtn.disabled = true;
+        refreshBtn.textContent = 'Loading…';
+    }
+    showOrdersStatus('Loading client and orders…', 'info');
+
+    try {
+        let apiUrl = `${baseUrl}/api/extension/client-orders?limit=25${buildUniteAccountQueryString()}`;
+        if (clientId) {
+            apiUrl += `&clientId=${encodeURIComponent(clientId)}`;
+        } else {
+            apiUrl += `&caseUrl=${encodeURIComponent(caseUrl.trim())}`;
+        }
+
+        const response = await fetch(apiUrl, {
+            method: 'GET',
+            headers: {
+                Authorization: `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+            },
+        });
+
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            throw new Error('Invalid response from server. Check your Base URL.');
+        }
+
+        const data = await response.json();
+        if (!response.ok) {
+            if (response.status === 401) throw new Error('Invalid API key. Check Settings.');
+            if (response.status === 404) {
+                if (clientCard) clientCard.style.display = 'none';
+                if (list) {
+                    list.innerHTML = clientId
+                        ? '<div class="orders-empty">Client not found. Try searching again.</div>'
+                        : '<div class="orders-empty">No client found for this Unite Us link.</div>';
+                }
+                showOrdersStatus(data.error || 'Client not found.', 'error');
+                lastLoadedSourceKey = sourceKey;
+                return;
+            }
+            throw new Error(data.error || `Request failed (${response.status})`);
+        }
+
+        if (!data.success) throw new Error(data.error || 'Failed to load orders');
+
+        lastLoadedSourceKey = sourceKey;
+        if (clientId) selectedClientId = clientId;
+        renderClientCard(data.client, data.dependentCount || 0);
+        renderOrdersList(data.orders || []);
+        const count = (data.orders || []).length;
+        showOrdersStatus(`${count} order${count === 1 ? '' : 's'} loaded.`, 'success');
+    } catch (error) {
+        console.error('Review orders error:', error);
+        if (clientCard) clientCard.style.display = 'none';
+        if (list) list.innerHTML = '';
+        if (error.name === 'TypeError' && error.message.includes('fetch')) {
+            showOrdersStatus('No internet connection.', 'error');
+        } else {
+            showOrdersStatus(error.message || 'Failed to load orders.', 'error');
+        }
+    } finally {
+        ordersLoadInFlight = false;
+        if (refreshBtn) {
+            refreshBtn.disabled = false;
+            refreshBtn.textContent = 'Refresh';
+        }
+    }
+}
+
 // Validate API key and initialize
 async function validateAndInitialize() {
     const validationSection = document.getElementById('validation-section');
     const errorSection = document.getElementById('error-section');
     const formSection = document.getElementById('form-section');
+    const ordersSection = document.getElementById('orders-section');
 
     // Show validation spinner
     validationSection.style.display = 'flex';
     errorSection.style.display = 'none';
     formSection.style.display = 'none';
+    if (ordersSection) ordersSection.style.display = 'none';
 
     const { baseUrl, apiKey } = getConfig();
 
@@ -188,10 +767,10 @@ async function validateAndInitialize() {
             throw new Error(data.error || 'Failed to validate API key');
         }
 
-        // API key is valid, show form and load data
+        // API key is valid, show active mode and load data
         validationSection.style.display = 'none';
         errorSection.style.display = 'none';
-        formSection.style.display = 'block';
+        applyModeUi();
 
         const uniteAccountSelect = document.getElementById('unite-account');
         if (uniteAccountSelect) {
@@ -199,16 +778,11 @@ async function validateAndInitialize() {
         }
         applyBrooklynOnlyUi();
 
-        await loadStatuses();
-        await loadNavigators();
-        await loadProduceVendorOptions();
-
-        // Setup form validation after form is visible
-        setupFormValidation();
-        
-        // Setup geocoding (auto + manual fallback)
-        setupAutoGeocode();
-        setupManualGeocode();
+        if (currentMode === 'add-clients') {
+            await ensureAddClientsReady();
+        } else {
+            await loadOrdersForCurrentTab(true);
+        }
     } catch (error) {
         console.error('Validation error:', error);
         validationSection.style.display = 'none';
@@ -230,6 +804,24 @@ async function validateAndInitialize() {
 
 // Setup event listeners
 function setupEventListeners() {
+    document.getElementById('mode-add-clients')?.addEventListener('click', () => {
+        setMode('add-clients');
+    });
+
+    document.getElementById('mode-review-orders')?.addEventListener('click', () => {
+        setMode('review-orders');
+    });
+
+    document.getElementById('orders-refresh-btn')?.addEventListener('click', () => {
+        lastLoadedSourceKey = '';
+        loadOrdersForCurrentTab(true);
+    });
+
+    document.getElementById('orders-client-search')?.addEventListener('input', handleClientSearchInput);
+    document.getElementById('orders-client-search')?.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') hideSearchResults();
+    });
+
     // Settings button
     document.getElementById('settings-btn').addEventListener('click', () => {
         openSettings();

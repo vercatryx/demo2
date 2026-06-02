@@ -3,14 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Client Food Service — Add Client</title>
+    <title>Client Food Service — Extension</title>
     <link rel="stylesheet" href="sidepanel.css">
 </head>
 <body id="panel-body" class="theme-main">
     <div class="container">
+        <div class="mode-switcher" role="tablist" aria-label="Extension mode">
+            <button type="button" id="mode-add-clients" class="mode-btn mode-btn-active" role="tab" aria-selected="true">Add Clients</button>
+            <button type="button" id="mode-review-orders" class="mode-btn" role="tab" aria-selected="false">Review Orders</button>
+        </div>
+
         <div class="header">
-            <h1>Add New Client</h1>
-            <p class="header-subtitle">Demo · scn.demo.poel.ai</p>
+            <h1 id="panel-title">Add New Client</h1>
         </div>
 
         <div id="validation-section" class="validation-section" style="display: none;">
@@ -26,6 +30,21 @@
                 <p id="error-text"></p>
                 <button id="open-settings-btn" class="btn btn-primary">Open Settings</button>
             </div>
+        </div>
+
+        <div id="orders-section" class="orders-section" style="display: none;">
+            <div class="orders-toolbar">
+                <button type="button" id="orders-refresh-btn" class="btn btn-refresh">Refresh</button>
+            </div>
+            <p id="orders-case-url" class="orders-case-url" aria-live="polite"></p>
+            <div id="orders-search-section" class="orders-search-section">
+                <label for="orders-client-search" class="orders-search-label">Search client by name</label>
+                <input type="search" id="orders-client-search" class="orders-search-input" placeholder="Type at least 2 letters…" autocomplete="off">
+                <div id="orders-search-results" class="orders-search-results" style="display: none;"></div>
+            </div>
+            <div id="orders-status" class="status-message" style="display: none;"></div>
+            <div id="orders-client-card" class="orders-client-card" style="display: none;"></div>
+            <div id="orders-list" class="orders-list"></div>
         </div>
 
         <div id="form-section" class="form-section" style="display: none;">

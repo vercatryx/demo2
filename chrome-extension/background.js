@@ -3,6 +3,28 @@ chrome.action.onClicked.addListener((tab) => {
     chrome.sidePanel.open({ windowId: tab.windowId });
 });
 
+function broadcastTabUrlChange(tabId, url) {
+    if (!url || typeof url !== 'string') return;
+    chrome.runtime.sendMessage({ action: 'tabUrlChanged', tabId, url }).catch(() => {});
+}
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (changeInfo.url) {
+        broadcastTabUrlChange(tabId, changeInfo.url);
+    } else if (changeInfo.status === 'complete' && tab?.url) {
+        broadcastTabUrlChange(tabId, tab.url);
+    }
+});
+
+chrome.tabs.onActivated.addListener(async (activeInfo) => {
+    try {
+        const tab = await chrome.tabs.get(activeInfo.tabId);
+        if (tab?.url) broadcastTabUrlChange(activeInfo.tabId, tab.url);
+    } catch (_) {
+        // Tab may have closed
+    }
+});
+
 // Handle script injection requests from side panel
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'extractContactData') {
@@ -15,6 +37,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             sendResponse({ success: false, error: error.message });
         });
         return true; // Indicates we will send a response asynchronously
+    }
+
+    if (request.action === 'extractPageClientHints') {
+        chrome.scripting.executeScript({
+            target: { tabId: request.tabId },
+            func: extractPageClientHints
+        }).then(results => {
+            sendResponse({ success: true, data: results[0]?.result });
+        }).catch(error => {
+            sendResponse({ success: false, error: error.message });
+        });
+        return true;
     }
 });
 
@@ -244,6 +278,53 @@ function extractContactData() {
             }
         } catch (e) {
             // ignore XPath errors
+        }
+    }
+
+    return data;
+}
+
+/** Client Details panel + contact page hints for Review Orders auto-search. */
+function extractPageClientHints() {
+    const data = { clientName: null, clientExternalId: null };
+
+    function readNameFromButton(btn) {
+        if (!btn) return null;
+        const clone = btn.cloneNode(true);
+        clone.querySelectorAll('svg, [role="img"]').forEach((el) => el.remove());
+        const name = (clone.textContent || '').replace(/\s+/g, ' ').trim();
+        return name || null;
+    }
+
+    const drawerBtn = document.querySelector('button[data-testid="clients-drawer-btn"]');
+    const drawerName = readNameFromButton(drawerBtn);
+    if (drawerName) data.clientName = drawerName;
+
+    const flexRows = document.querySelectorAll('.flex');
+    for (const row of flexRows) {
+        const labelEl = row.querySelector('.font-extrabold');
+        if (!labelEl) continue;
+        const label = labelEl.textContent.trim().replace(/\s+/g, ' ');
+        const valueEl = row.querySelector('.col-xs-7');
+        if (!valueEl) continue;
+
+        if (label === 'Client ID#:' || label === 'Client ID#') {
+            const idText = (valueEl.textContent || '').replace(/\s+/g, ' ').trim();
+            if (idText) data.clientExternalId = idText;
+        }
+
+        if (!data.clientName && (label === 'Client Name:' || label === 'Client Name')) {
+            const nameBtn = valueEl.querySelector('[data-testid="clients-drawer-btn"]');
+            const rowName = readNameFromButton(nameBtn) || (valueEl.textContent || '').replace(/\s+/g, ' ').trim();
+            if (rowName) data.clientName = rowName;
+        }
+    }
+
+    if (!data.clientName) {
+        const nameEl = document.querySelector('.contact-column__name');
+        if (nameEl) {
+            const name = nameEl.textContent.trim();
+            if (name) data.clientName = name;
         }
     }
 

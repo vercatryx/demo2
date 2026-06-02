@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Client Food Service Import",
-  "version": "1.1.1",
-  "description": "Add clients to Client Food Service (demo) from Unite Us",
+  "version": "1.3.2",
+  "description": "Add clients and review orders for Client Food Service (demo)",
   "permissions": [
     "storage",
     "sidePanel",

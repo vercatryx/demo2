@@ -72,6 +72,311 @@ body {
     padding: 20px;
 }
 
+.mode-switcher {
+    display: flex;
+    width: 100%;
+    margin: -4px -4px 16px;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+    background: var(--bg-surface);
+    box-shadow: var(--shadow-sm);
+}
+
+.mode-btn {
+    flex: 1;
+    padding: 10px 8px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.mode-btn + .mode-btn {
+    border-left: 1px solid var(--border-color);
+}
+
+.mode-btn:hover {
+    background: var(--bg-surface-hover);
+    color: var(--text-primary);
+}
+
+.mode-btn-active {
+    background: var(--color-primary);
+    color: #fff;
+}
+
+.mode-btn-active:hover {
+    background: var(--color-primary-hover);
+    color: #fff;
+}
+
+.orders-section {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.orders-toolbar {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.orders-case-url {
+    font-size: 0.75rem;
+    color: var(--text-tertiary);
+    word-break: break-all;
+    line-height: 1.4;
+    padding: 8px 10px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color-light);
+    border-radius: var(--radius-md);
+}
+
+.orders-search-section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.orders-search-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.orders-search-input {
+    width: 100%;
+    padding: 0.55rem 0.75rem;
+    border: 1px solid var(--border-color-light);
+    border-radius: var(--radius-md);
+    font-size: 0.9rem;
+    background: var(--bg-input);
+    color: var(--text-primary);
+}
+
+.orders-search-input:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.orders-search-results {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 220px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color-light);
+    border-radius: var(--radius-md);
+    background: var(--bg-surface);
+    box-shadow: var(--shadow-sm);
+}
+
+.orders-search-result {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 10px 12px;
+    border: none;
+    border-bottom: 1px solid var(--border-color-light);
+    background: transparent;
+    cursor: pointer;
+    color: var(--text-primary);
+}
+
+.orders-search-result:last-child {
+    border-bottom: none;
+}
+
+.orders-search-result:hover,
+.orders-search-result:focus {
+    background: var(--bg-surface-hover);
+    outline: none;
+}
+
+.orders-search-result-name {
+    font-weight: 600;
+    font-size: 0.88rem;
+}
+
+.orders-search-result-meta {
+    font-size: 0.75rem;
+    color: var(--text-tertiary);
+    margin-top: 2px;
+}
+
+.orders-search-empty {
+    padding: 12px;
+    font-size: 0.82rem;
+    color: var(--text-tertiary);
+    text-align: center;
+}
+
+.orders-client-card {
+    padding: 14px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color-light);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+}
+
+.orders-client-card h2 {
+    font-size: 1rem;
+    font-weight: 700;
+    margin-bottom: 8px;
+    color: var(--text-primary);
+}
+
+.orders-client-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+}
+
+.orders-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.orders-empty {
+    padding: 24px 16px;
+    text-align: center;
+    color: var(--text-tertiary);
+    font-size: 0.9rem;
+    background: var(--bg-surface);
+    border: 1px dashed var(--border-color);
+    border-radius: var(--radius-md);
+}
+
+.order-card {
+    padding: 12px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color-light);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+}
+
+.order-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.order-card-title {
+    font-weight: 700;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+}
+
+.order-card-date {
+    font-size: 0.78rem;
+    color: var(--text-tertiary);
+    white-space: nowrap;
+}
+
+.order-card-details {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-bottom: 10px;
+}
+
+.order-status {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+
+.order-status-completed,
+.order-status-billing_pending {
+    background: #dcfce7;
+    color: #15803d;
+}
+
+.order-status-pending,
+.order-status-scheduled {
+    background: #fef9c3;
+    color: #854d0e;
+}
+
+.order-status-cancelled {
+    background: #fee2e2;
+    color: #b91c1c;
+}
+
+.order-status-other {
+    background: var(--border-color-light);
+    color: var(--text-secondary);
+}
+
+.order-proof {
+    margin-top: 8px;
+}
+
+.order-proof-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+}
+
+.order-proof-thumb {
+    display: block;
+    max-width: 100%;
+    max-height: 160px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color-light);
+    object-fit: contain;
+    background: #f8fafc;
+}
+
+.order-proof-link {
+    font-size: 0.8rem;
+    color: var(--color-primary);
+    word-break: break-all;
+}
+
+.order-proof-missing {
+    font-size: 0.8rem;
+    color: var(--text-tertiary);
+    font-style: italic;
+}
+
+.btn-refresh {
+    padding: 0.45rem 0.9rem;
+    font-size: 0.82rem;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+}
+
+.btn-refresh:hover {
+    background: var(--bg-surface-hover);
+}
+
+.btn-refresh:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
 .header {
     margin-bottom: 20px;
     padding-bottom: 15px;
@@ -82,13 +387,6 @@ body {
     font-size: 20px;
     color: var(--text-primary);
     font-weight: 700;
-}
-
-.header-subtitle {
-    margin: 4px 0 0;
-    font-size: 12px;
-    color: var(--text-secondary, #64748b);
-    font-weight: 500;
 }
 
 .connection-row {
