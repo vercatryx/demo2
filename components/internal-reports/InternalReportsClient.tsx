@@ -37,6 +37,7 @@ function ExcelLogoMark({ size = 22 }: { size?: number }) {
 const STREAM_URL = '/api/internal-reports/chat/stream';
 const TRANSCRIBE_URL = '/api/internal-reports/transcribe';
 const COMMIT_WRITES_URL = '/api/internal-reports/commit-writes';
+const COMMIT_MESSAGES_URL = '/api/internal-reports/commit-messages';
 const EDITING_SESSION_URL = '/api/internal-reports/editing-session';
 const UPLOAD_SPREADSHEET_URL = '/api/internal-reports/upload-spreadsheet';
 
@@ -97,6 +98,24 @@ type PendingWritesProposal = {
     operations: { title: string; impactRowCount: number; sampleRows: Record<string, unknown>[] }[];
 };
 
+type PendingMessagesProposal = {
+    pendingId: string;
+    summary: string;
+    channel: 'email' | 'sms' | 'call';
+    recipientCount: number;
+    willSendCount: number;
+    skippedCount: number;
+    downloadUrl: string;
+    filename: string;
+    sampleRows: Record<string, unknown>[];
+};
+
+function channelLabel(channel: PendingMessagesProposal['channel']): string {
+    if (channel === 'email') return 'Email';
+    if (channel === 'call') return 'Phone call';
+    return 'SMS';
+}
+
 type StreamEvent =
     | { type: 'turn'; turn: number; maxTurns: number }
     | { type: 'llm_start' }
@@ -113,6 +132,18 @@ type StreamEvent =
           downloadUrl: string;
           filename: string;
           operations: { title: string; impactRowCount: number; sampleRows: Record<string, unknown>[] }[];
+      }
+    | {
+          type: 'pending_messages_ready';
+          pendingId: string;
+          summary: string;
+          channel: 'email' | 'sms' | 'call';
+          recipientCount: number;
+          willSendCount: number;
+          skippedCount: number;
+          downloadUrl: string;
+          filename: string;
+          sampleRows: Record<string, unknown>[];
       }
     | { type: 'assistant_chunk'; text: string }
     | { type: 'done'; messages: LlmMessage[] }
@@ -148,6 +179,7 @@ function toolActivityLabel(name: string): string {
     if (name === 'run_select_query') return 'Looking that up in the database…';
     if (name === 'export_select_to_xlsx') return 'Building your Excel file…';
     if (name === 'propose_batch_writes') return 'Preparing change review (impact rows + dry-run)…';
+    if (name === 'propose_mass_messages') return 'Building message preview (recipients + Excel)…';
     if (name === 'offer_spreadsheet_reupload') return 'Ready for your spreadsheet upload…';
     return 'Working on it…';
 }
@@ -354,12 +386,18 @@ export function InternalReportsClient() {
     const mediaStreamRef = useRef<MediaStream | null>(null);
     const [exportByMessageIndex, setExportByMessageIndex] = useState<Record<number, ExportRow[]>>({});
     const [pendingWrites, setPendingWrites] = useState<PendingWritesProposal | null>(null);
+    const [pendingMessages, setPendingMessages] = useState<PendingMessagesProposal | null>(null);
     const [successBanner, setSuccessBanner] = useState('');
     const [commitModalOpen, setCommitModalOpen] = useState(false);
     const [commitAckDanger, setCommitAckDanger] = useState(false);
     const [commitPhrase, setCommitPhrase] = useState('');
     const [commitBusy, setCommitBusy] = useState(false);
     const [commitModalError, setCommitModalError] = useState('');
+    const [messagesModalOpen, setMessagesModalOpen] = useState(false);
+    const [messagesCommitAck, setMessagesCommitAck] = useState(false);
+    const [messagesCommitPhrase, setMessagesCommitPhrase] = useState('');
+    const [messagesCommitError, setMessagesCommitError] = useState('');
+    const [messagesCommitBusy, setMessagesCommitBusy] = useState(false);
     const [editingSessionToken, setEditingSessionToken] = useState<string | null>(null);
     const [editingMintBusy, setEditingMintBusy] = useState(false);
     const [editingMintError, setEditingMintError] = useState('');
@@ -467,11 +505,16 @@ export function InternalReportsClient() {
         setChatLlm([]);
         setExportByMessageIndex({});
         setPendingWrites(null);
+        setPendingMessages(null);
         setSuccessBanner('');
         setCommitModalOpen(false);
         setCommitAckDanger(false);
         setCommitPhrase('');
         setCommitModalError('');
+        setMessagesModalOpen(false);
+        setMessagesCommitAck(false);
+        setMessagesCommitPhrase('');
+        setMessagesCommitError('');
         setLiveActivity(null);
         setStreamingText('');
         setError('');
@@ -569,6 +612,22 @@ export function InternalReportsClient() {
                     setCommitAckDanger(false);
                     setCommitPhrase('');
                     setCommitModalError('');
+                } else if (ev.type === 'pending_messages_ready') {
+                    setPendingMessages({
+                        pendingId: ev.pendingId,
+                        summary: ev.summary,
+                        channel: ev.channel,
+                        recipientCount: ev.recipientCount,
+                        willSendCount: ev.willSendCount,
+                        skippedCount: ev.skippedCount,
+                        downloadUrl: ev.downloadUrl,
+                        filename: ev.filename,
+                        sampleRows: ev.sampleRows,
+                    });
+                    setMessagesModalOpen(false);
+                    setMessagesCommitAck(false);
+                    setMessagesCommitPhrase('');
+                    setMessagesCommitError('');
                 } else if (ev.type === 'assistant_chunk') {
                     setStreamingText((t) => t + ev.text);
                 } else if (ev.type === 'spreadsheet_upload_offered') {
@@ -828,10 +887,23 @@ export function InternalReportsClient() {
 
     const dismissPendingWrites = useCallback(() => {
         setPendingWrites(null);
+        setPendingMessages(null);
         setCommitModalOpen(false);
         setCommitAckDanger(false);
         setCommitPhrase('');
         setCommitModalError('');
+        setMessagesModalOpen(false);
+        setMessagesCommitAck(false);
+        setMessagesCommitPhrase('');
+        setMessagesCommitError('');
+    }, []);
+
+    const dismissPendingMessages = useCallback(() => {
+        setPendingMessages(null);
+        setMessagesModalOpen(false);
+        setMessagesCommitAck(false);
+        setMessagesCommitPhrase('');
+        setMessagesCommitError('');
     }, []);
 
     const submitCommitWrites = useCallback(async () => {
@@ -876,6 +948,54 @@ export function InternalReportsClient() {
             setCommitBusy(false);
         }
     }, [pendingWrites, commitAckDanger, commitPhrase, dismissPendingWrites, editingSessionToken]);
+
+    const submitCommitMessages = useCallback(async () => {
+        if (!pendingMessages) return;
+        setMessagesCommitError('');
+        if (!messagesCommitAck) {
+            setMessagesCommitError('Check the box to confirm you reviewed the message list.');
+            return;
+        }
+        if (messagesCommitPhrase.trim() !== 'SEND') {
+            setMessagesCommitError('Type SEND in all caps to confirm.');
+            return;
+        }
+        setMessagesCommitBusy(true);
+        try {
+            const res = await fetch(internalReportsApiPath(COMMIT_MESSAGES_URL), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    pendingId: pendingMessages.pendingId,
+                    confirmationPhrase: 'SEND',
+                }),
+            });
+            const data = (await res.json().catch(() => ({}))) as {
+                ok?: boolean;
+                error?: string;
+                sent?: number;
+                failed?: number;
+                skipped?: number;
+            };
+            if (!res.ok || data.ok === false) {
+                setMessagesCommitError(data.error || `Request failed (${res.status})`);
+                return;
+            }
+            const parts = [
+                data.sent != null ? `${data.sent.toLocaleString()} sent` : null,
+                data.failed ? `${data.failed.toLocaleString()} failed` : null,
+                data.skipped ? `${data.skipped.toLocaleString()} skipped` : null,
+            ]
+                .filter(Boolean)
+                .join(' · ');
+            setSuccessBanner(parts ? `Messages queued. ${parts}` : 'Messages sent successfully.');
+            dismissPendingMessages();
+        } catch (e: unknown) {
+            setMessagesCommitError(e instanceof Error ? e.message : String(e));
+        } finally {
+            setMessagesCommitBusy(false);
+        }
+    }, [pendingMessages, messagesCommitAck, messagesCommitPhrase, dismissPendingMessages]);
 
     const lastUserVisibleIdx = visibleTurns.map((x) => x.m.role).lastIndexOf('user');
 
@@ -1142,6 +1262,80 @@ export function InternalReportsClient() {
                                     }}
                                 >
                                     Review and apply…
+                                </button>
+                            </div>
+                        </div>
+                    ) : null}
+
+                    {pendingMessages ? (
+                        <div
+                            style={{
+                                padding: '1rem 1.25rem',
+                                borderTop: '1px solid var(--border-color-light)',
+                                background: 'rgba(59, 130, 246, 0.08)',
+                            }}
+                        >
+                            <div
+                                style={{
+                                    fontSize: '0.62rem',
+                                    fontWeight: 800,
+                                    letterSpacing: '0.06em',
+                                    textTransform: 'uppercase',
+                                    color: 'var(--text-tertiary)',
+                                    marginBottom: '0.35rem',
+                                }}
+                            >
+                                Pending {channelLabel(pendingMessages.channel).toLowerCase()} messages
+                            </div>
+                            <p style={{ margin: '0 0 0.5rem', fontSize: '0.95rem', fontWeight: 700, lineHeight: 1.45 }}>
+                                {pendingMessages.summary}
+                            </p>
+                            <p style={{ margin: '0 0 0.75rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                                {pendingMessages.willSendCount.toLocaleString()} will send ·{' '}
+                                {pendingMessages.skippedCount.toLocaleString()} skipped ·{' '}
+                                {pendingMessages.recipientCount.toLocaleString()} total in preview. Download the workbook
+                                to review each person&apos;s message. Nothing has been sent yet.
+                            </p>
+                            <a
+                                href={toAbsoluteDownloadUrl(pendingMessages.downloadUrl)}
+                                download={pendingMessages.filename}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="btn btn-secondary"
+                                style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.45rem',
+                                    textDecoration: 'none',
+                                    fontSize: '0.88rem',
+                                    padding: '0.5rem 0.95rem',
+                                    marginBottom: '0.75rem',
+                                }}
+                            >
+                                <ExcelLogoMark size={18} />
+                                <span style={{ fontWeight: 700 }}>Download message preview</span>
+                            </a>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                                <button
+                                    type="button"
+                                    className="btn btn-secondary"
+                                    style={{ fontSize: '0.85rem' }}
+                                    onClick={dismissPendingMessages}
+                                >
+                                    Dismiss
+                                </button>
+                                <button
+                                    type="button"
+                                    className="btn btn-primary"
+                                    style={{ fontSize: '0.85rem' }}
+                                    onClick={() => {
+                                        setMessagesModalOpen(true);
+                                        setMessagesCommitAck(false);
+                                        setMessagesCommitPhrase('');
+                                        setMessagesCommitError('');
+                                    }}
+                                >
+                                    Review and send…
                                 </button>
                             </div>
                         </div>
@@ -1457,6 +1651,128 @@ export function InternalReportsClient() {
                                 </button>
                                 <button type="button" className="btn btn-danger" disabled={commitBusy} onClick={() => void submitCommitWrites()}>
                                     {commitBusy ? 'Applying…' : 'Apply changes'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                ) : null}
+
+                {messagesModalOpen && pendingMessages ? (
+                    <div
+                        style={{
+                            position: 'fixed',
+                            inset: 0,
+                            zIndex: 50,
+                            background: 'rgba(15, 23, 42, 0.5)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            padding: '1rem',
+                        }}
+                        role="presentation"
+                        onClick={(e) => {
+                            if (e.target === e.currentTarget && !messagesCommitBusy) setMessagesModalOpen(false);
+                        }}
+                    >
+                        <div
+                            className="card"
+                            role="dialog"
+                            aria-modal="true"
+                            aria-labelledby="commit-messages-title"
+                            style={{ maxWidth: 480, width: '100%', padding: '1.25rem' }}
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem', marginBottom: '0.75rem' }}>
+                                <AlertTriangle
+                                    size={22}
+                                    style={{ flexShrink: 0, color: 'var(--color-primary)', marginTop: 2 }}
+                                    aria-hidden
+                                />
+                                <div>
+                                    <h2 id="commit-messages-title" style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800 }}>
+                                        Confirm send
+                                    </h2>
+                                    <p style={{ margin: '0.35rem 0 0', fontSize: '0.88rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                                        This will send {channelLabel(pendingMessages.channel).toLowerCase()} messages to{' '}
+                                        <strong>{pendingMessages.willSendCount.toLocaleString()}</strong> recipient(s). Review
+                                        the Excel preview first.
+                                    </p>
+                                </div>
+                            </div>
+                            <p
+                                style={{
+                                    margin: '0 0 0.75rem',
+                                    fontSize: '0.82rem',
+                                    padding: '0.55rem 0.65rem',
+                                    borderRadius: 8,
+                                    background: 'var(--bg-surface)',
+                                    border: '1px solid var(--border-color-light)',
+                                    lineHeight: 1.45,
+                                }}
+                            >
+                                <strong>Summary:</strong> {pendingMessages.summary}
+                            </p>
+                            <label
+                                style={{
+                                    display: 'flex',
+                                    alignItems: 'flex-start',
+                                    gap: '0.5rem',
+                                    fontSize: '0.86rem',
+                                    cursor: 'pointer',
+                                    marginBottom: '0.75rem',
+                                    lineHeight: 1.45,
+                                }}
+                            >
+                                <input
+                                    type="checkbox"
+                                    checked={messagesCommitAck}
+                                    onChange={(e) => setMessagesCommitAck(e.target.checked)}
+                                    style={{ marginTop: 3 }}
+                                />
+                                <span>I reviewed the message preview and each recipient looks correct.</span>
+                            </label>
+                            <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-tertiary)', marginBottom: '0.25rem' }}>
+                                Type SEND to confirm
+                            </label>
+                            <input
+                                type="text"
+                                autoComplete="off"
+                                value={messagesCommitPhrase}
+                                onChange={(e) => setMessagesCommitPhrase(e.target.value)}
+                                placeholder="SEND"
+                                disabled={messagesCommitBusy}
+                                style={{
+                                    width: '100%',
+                                    padding: '0.55rem 0.65rem',
+                                    fontSize: '0.9rem',
+                                    borderRadius: 8,
+                                    border: '1px solid var(--border-color)',
+                                    background: 'var(--bg-surface)',
+                                    color: 'var(--text-primary)',
+                                    marginBottom: '0.65rem',
+                                }}
+                            />
+                            {messagesCommitError ? (
+                                <p style={{ margin: '0 0 0.65rem', fontSize: '0.82rem', color: 'var(--color-danger)' }}>
+                                    {messagesCommitError}
+                                </p>
+                            ) : null}
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                <button
+                                    type="button"
+                                    className="btn btn-secondary"
+                                    disabled={messagesCommitBusy}
+                                    onClick={() => !messagesCommitBusy && setMessagesModalOpen(false)}
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="button"
+                                    className="btn btn-primary"
+                                    disabled={messagesCommitBusy}
+                                    onClick={() => void submitCommitMessages()}
+                                >
+                                    {messagesCommitBusy ? 'Sending…' : `Send ${pendingMessages.willSendCount} messages`}
                                 </button>
                             </div>
                         </div>

@@ -33,10 +33,6 @@ export const metadata: Metadata = {
     template: '%s | Client Food Service Admin',
   },
   description: 'Admin portal for managing client food services.',
-  icons: {
-    icon: '/app-logo.png',
-    apple: '/app-logo.png',
-  },
 };
 
 // Use cookies/session in layout — opt out of static generation so build doesn't log cookie errors

@@ -78,3 +78,12 @@ export async function stopTranscription(
   });
 }
 
+export async function hangupCall(
+  callControlId: string,
+  options?: { commandId?: string },
+): Promise<TelnyxCommandResult> {
+  return telnyxPost(`/calls/${encodeURIComponent(callControlId)}/actions/hangup`, {
+    ...(options?.commandId ? { command_id: options.commandId } : {}),
+  });
+}
+

@@ -1,91 +1,51 @@
-# DietCombo Chrome Extension
+# Client Food Service Chrome Extension (Demo)
 
-A Chrome extension that allows you to quickly add clients to DietCombo from Unite Us pages. The extension opens as a sidebar (not a popup) and provides a comprehensive form for entering all client information.
+Adapted copy of the DietCombo Chrome extension for demoing against **Client Food Service** at [scn.demo.poel.ai](https://scn.demo.poel.ai/).
 
-## Features
+The upstream extension is unchanged in `../dietcombo copy/chrome-extension/` and `../chrome-extension-original/`.
 
-- **Sidebar Interface**: Opens as a sidebar panel for easy access while browsing
-- **Complete Client Form**: All fields needed for creating a client in DietCombo
-- **Geocoding Support**: Automatic address geocoding with options for:
-  - Auto (tries Nominatim, then Google)
-  - Nominatim (OpenStreetMap)
-  - Google Maps
-  - Skip geocoding
-- **Unite Us Integration**: 
-  - Extract Unite Us link from current page
-  - Validate Unite Us URL format
-- **API Integration**: Secure API key authentication
-- **Form Validation**: Client-side validation for required fields
+## Install
 
-## Installation
+1. Open Chrome → `chrome://extensions/`
+2. Enable **Developer mode**
+3. Click **Load unpacked**
+4. Select this folder: `chrome-extension-demo`
 
-1. Open Chrome and navigate to `chrome://extensions/`
-2. Enable "Developer mode" (toggle in top right)
-3. Click "Load unpacked"
-4. Select the `chrome-extension` folder from this project
+## Configure
 
-## Configuration
-
-1. Open the extension sidebar
+1. Click the extension icon to open the side panel
 2. Click **Settings** (gear at the bottom)
-3. Enter **Base URL** (e.g., `https://customer.thedietfantasy.com`)
-4. Enter your **API Key** (set `EXTENSION_API_KEY` on your server)
-5. Click **Test connection** to verify, then **Save Settings**
+3. **Base URL:** `https://scn.demo.poel.ai` (default)
+4. **API Key:** must match `EXTENSION_API_KEY` on the demo-food server
+5. Click **Test connection**, then **Save Settings**
+
+For local dev against `http://localhost:3000`, change the base URL in settings.
 
 ## Usage
 
-1. Navigate to a Unite Us case page (optional, for auto-extraction)
-2. Click the extension icon to open the sidebar
-3. Fill in the client information:
-   - **Basic Information**: Name, email
-   - **Contact Information**: Phone numbers
-   - **Address Information**: Full address with geocoding
-   - **Service Information**: Service type, status, navigator, Unite Account (Regular or Brooklyn), etc.
-   - **Unite Us Information**: Case link (can be extracted from current page)
-   - **Additional Information**: Notes, dislikes, flags
-4. Click "Geocode Address" to get coordinates (optional)
-5. Click "Create Client" to submit
+1. Open a client case in Unite Us (optional — use **Auto Fill from Page**)
+2. Fill in client details in the side panel
+3. Choose **Unite account** (Regular or Brooklyn)
+4. Click **Submit** to create the client via `POST /api/extension/create-client`
 
-## API Requirements
+## API endpoints used
 
-The extension requires the following API endpoints:
+- `POST /api/extension/create-client`
+- `GET /api/extension/statuses`
+- `GET /api/extension/navigators`
+- `GET /api/geocode?q=…&provider=…`
 
-- `POST /api/extension/create-client` - Create a new client
-- `GET /api/extension/statuses` - Get available statuses
-- `GET /api/extension/navigators` - Get available navigators
-- `GET /api/geocode?q=<address>&provider=<provider>` - Geocode an address
+All require `Authorization: Bearer <EXTENSION_API_KEY>`.
 
-All endpoints require API key authentication via `Authorization: Bearer <API_KEY>` header.
+## Icons
 
-## Environment Variables
+Icons in `icons/` are generated from the Client Food Service app logo. Regenerate with:
 
-On your server, set:
-- `EXTENSION_API_KEY` - API key for extension authentication
+```bash
+LOGO="../demo-food/public/app-logo.png"
+for s in 16 48 128; do sips -z $s $s "$LOGO" --out "icons/icon${s}.png"; done
+```
 
-## Icon Files
+## Reload after changes
 
-The extension requires icon files at:
-- `icons/icon16.png` (16x16 pixels)
-- `icons/icon48.png` (48x48 pixels)
-- `icons/icon128.png` (128x128 pixels)
-
-You can create simple placeholder icons or use a design tool to create proper icons.
-
-## Development
-
-To modify the extension:
-
-1. Edit files in `chrome-extension/` directory
-2. Go to `chrome://extensions/`
-3. Click the refresh icon on the extension card
-4. Test your changes
-
-## Troubleshooting
-
-- **"Error loading statuses/navigators"**: Check that your API URL and API Key are correct
-- **"Geocoding failed"**: Check your internet connection and try a different provider
-- **"Invalid Unite Us URL"**: Make sure you're using a valid Unite Us case URL format
-
-## Support
-
-For issues or questions, please contact the development team.
+On `chrome://extensions/`, click the refresh icon on this extension card.

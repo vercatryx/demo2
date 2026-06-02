@@ -1,8 +1,8 @@
-// Single connection config
-const DEFAULT_BASE = 'https://customer.thedietfantasy.com';
+// Demo build — Client Food Service at scn.demo.poel.ai
+const DEFAULT_BASE = 'https://scn.demo.poel.ai';
 
 /** Set to `true` to always use Unite “Brooklyn” and the light blue theme (hides the Unite dropdown). */
-const BROOKLYN_ONLY = true;
+const BROOKLYN_ONLY = false;
 
 /** Explains the exact Unite Us pattern when the pasted URL does not match `isValidCaseUrl`. */
 const CASE_URL_INCORRECT_HINT =

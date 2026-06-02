@@ -9,7 +9,7 @@ function quoteIdent(name: string): string {
 
 function serializeValue(v: unknown): unknown {
     if (v === undefined) return null;
-    if (v !== null && typeof v === 'object' && !Array.isArray(v) && !(v instanceof Date)) {
+    if (v !== null && typeof v === 'object' && !(v instanceof Date)) {
         return JSON.stringify(v);
     }
     return v;
@@ -36,18 +36,21 @@ export function createPgSeedDb(connectionString: string) {
         const tableSql = quoteIdent(table);
         return {
             delete() {
+                const runDelete = async (whereSql: string, params: unknown[]) => {
+                    try {
+                        const result = await pool.query(`DELETE FROM ${tableSql} WHERE ${whereSql}`, params);
+                        return { error: null, count: result.rowCount ?? 0 };
+                    } catch (error) {
+                        const err = error as { message: string; code?: string };
+                        return { error: err, count: 0 };
+                    }
+                };
                 return {
-                    async neq(column: string, value: string) {
-                        try {
-                            const result = await pool.query(
-                                `DELETE FROM ${tableSql} WHERE ${quoteIdent(column)} <> $1`,
-                                [value]
-                            );
-                            return { error: null, count: result.rowCount ?? 0 };
-                        } catch (error) {
-                            const err = error as { message: string; code?: string };
-                            return { error: err, count: 0 };
-                        }
+                    neq(column: string, value: string) {
+                        return runDelete(`${quoteIdent(column)} <> $1`, [value]);
+                    },
+                    eq(column: string, value: unknown) {
+                        return runDelete(`${quoteIdent(column)} = $1`, [value]);
                     },
                 };
             },

@@ -22,6 +22,7 @@ import {
     CreditCard,
     FileText,
     Database,
+    Mail,
 } from 'lucide-react';
 import {
     canAccessAdminPanel,
@@ -53,6 +54,7 @@ const navItems = [
     { label: 'Data Copilot', href: '/internal-data-reports', icon: Database },
     { label: 'AI Usage', href: '/admin/ai-usage', icon: PieChart },
     { label: 'Admin Control', href: '/admin', icon: Settings },
+    { label: 'Mass Messaging', href: '/admin/messaging', icon: Mail },
 ];
 
 import { useTime } from '@/lib/time-context';
@@ -177,7 +179,7 @@ export function Sidebar({
                     if (item.label === 'Pending screenings' || item.label === 'Changes' || item.label === 'Missing Orders') {
                         return canAccessAdminPanel(userRole);
                     }
-                    if (item.label === 'Admin Control' || item.label === 'Downloads' || item.label === 'Produce') {
+                    if (item.label === 'Admin Control' || item.label === 'Downloads' || item.label === 'Produce' || item.label === 'Mass Messaging') {
                         return canAccessAdminPanel(userRole);
                     }
                     if (item.label === 'AI Builder' || item.label === 'AI Usage' || item.label === 'Data Copilot') {

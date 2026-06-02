@@ -12,6 +12,7 @@ import { buildQueryExportWorkbook } from '@/lib/internal-reports/build-adhoc-xls
 import { putExportXlsx } from '@/lib/internal-reports/export-token-cache';
 import { tryPublishXlsxPublicUrl } from '@/lib/internal-reports/publish-export-r2';
 import { runProposeBatchWritesTool } from '@/lib/internal-reports/propose-batch-writes';
+import { runProposeMassMessagesTool } from '@/lib/internal-reports/propose-mass-messages';
 import { validateEditingSessionToken } from '@/lib/internal-reports/editing-session';
 import { getInternalReportsPostgresUrl, runReadonlySelect, runReadonlySelectForExport } from '@/lib/internal-reports/read-sql';
 import { internalReportsWritesEnabled } from '@/lib/internal-reports/write-sql';
@@ -206,6 +207,48 @@ function buildTools(includeProposeWrites: boolean): LlmTool[] {
         },
     ];
     out.push({
+        name: 'propose_mass_messages',
+        description:
+            'When the user wants to **email, text, or call clients in bulk** (e.g. "everyone on vendor X should get an email saying…"): ' +
+            'build a **review package** with a recipients SELECT and message content. Creates an Excel preview with each person\'s message; **nothing is sent** until they confirm in the UI. ' +
+            'Use `message_template` with {{name}} for the same text to everyone, or a per-row message column in SQL.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                summary: {
+                    type: 'string',
+                    description: 'Plain-language description (used in filenames and confirmation UI).',
+                },
+                channel: {
+                    type: 'string',
+                    enum: ['email', 'sms', 'call'],
+                    description: 'Delivery channel.',
+                },
+                subject: {
+                    type: 'string',
+                    description: 'Email subject (required for email unless each SQL row has a subject column).',
+                },
+                message_template: {
+                    type: 'string',
+                    description:
+                        'Message body template with {{name}} or <name> for personalization. Used when SQL rows do not carry their own message text.',
+                },
+                message_column: {
+                    type: 'string',
+                    description:
+                        'Optional SQL column name for per-person message text (overrides template for that row).',
+                },
+                recipients_select_sql: {
+                    type: 'string',
+                    description:
+                        'Single SELECT or WITH (read-only). One row per recipient. Must include client id, name, and email (email channel) or phone (sms/call). ' +
+                        'Optional columns: message/body_text, subject.',
+                },
+            },
+            required: ['summary', 'channel', 'recipients_select_sql'],
+        },
+    });
+    out.push({
         name: 'offer_spreadsheet_reupload',
         description:
             'Show the **Upload Excel** button in the chat UI. Call when the user should **edit a spreadsheet and re-upload** it for bulk changes — ' +
@@ -389,6 +432,18 @@ export type InternalReportsProgressEvent =
           filename: string;
           operations: { title: string; impactRowCount: number; sampleRows: Record<string, unknown>[] }[];
       }
+    | {
+          type: 'pending_messages_ready';
+          pendingId: string;
+          summary: string;
+          channel: 'email' | 'sms' | 'call';
+          recipientCount: number;
+          willSendCount: number;
+          skippedCount: number;
+          downloadUrl: string;
+          filename: string;
+          sampleRows: Record<string, unknown>[];
+      }
     | { type: 'assistant_chunk'; text: string }
     | { type: 'spreadsheet_upload_offered'; label: string; hint?: string };
 
@@ -458,6 +513,7 @@ export async function runInternalReportsChat(
     const toolsList = `### Tools
 - **run_select_query** — fast preview (capped rows). Use to explore and validate logic.
 - **export_select_to_xlsx** — produce a **downloadable Excel** (one data sheet) from one SELECT/WITH.
+- **propose_mass_messages** — package **bulk email, SMS, or phone calls** for human review: recipients SELECT + message template; generates a **review Excel** with each person's message. **Does not send** until the user confirms in the UI.
 - **offer_spreadsheet_reupload** — show the **Upload Excel** button after an editable export (call when re-upload is the next step).
 - **export_boxes_org_template** — Excel for **Admin → Boxes Org** (menu items + Category/sub1/Sub2).${
         writesToolEnabled
@@ -479,10 +535,22 @@ export async function runInternalReportsChat(
 `
         : '';
 
+    const messagingInstructions = `
+
+### Mass messaging (propose_mass_messages)
+- Use when the user wants to **email, text, or call** clients in bulk — e.g. "everyone with vendor X in their upcoming order should get an email saying…", "text all approved clients who…", "call everyone missing an order".
+- Write **recipients_select_sql**: one row per person with **client id**, **name**, and **email** (email channel) or **phone** / **phone_number** (sms/call). Join \`clients\`, \`client_statuses\`, \`upcoming_order\` JSON, vendors, menu items as needed.
+- **message_template**: text with \`{{name}}\` or \`<name>\` when everyone gets the same message. For **different text per person**, put a \`message\` (or \`body_text\`) column in the SELECT and set **message_column**, or build the text in SQL with CASE.
+- **subject** is required for **email** (unless each row has a subject column).
+- Prefer **run_select_query** first to check audience size and sample rows; then **propose_mass_messages**.
+- After the tool returns: recap who gets what, show a **small** sample table, and say the **full** message list is in the review Excel — **nothing sends** until they download, review, and confirm with **SEND** in the UI.
+- Do **not** claim messages were already sent.
+`;
+
     const baseSystem = `You are the Demo Food app's **internal data copilot** (meal delivery / client orders / vendors / billing). There are **no pre-built report definitions** in your toolset: you interpret every question from scratch using the schema documentation below, write your own SQL, and answer from query results.
 
 ${toolsList}
-${writesInstructions}${editingGateHelp}${mutationPolicy}
+${messagingInstructions}${writesInstructions}${editingGateHelp}${mutationPolicy}
 ### Conversation
 - The **system** block may include a short **Conversation memory** section: recent user messages and assistant reply excerpts (text only, no result rows). Use it for follow-ups (“same as before”, “narrow that”, etc.).
 - The **message list** may shorten older **tool** payloads to save tokens; rely on memory + new queries as needed.
@@ -735,6 +803,21 @@ ${dict}
                             }
                         );
                     }
+                } else if (tc.name === 'propose_mass_messages') {
+                    payload = await runProposeMassMessagesTool(tc.input, async (p) => {
+                        await emit?.({
+                            type: 'pending_messages_ready',
+                            pendingId: p.pendingId,
+                            summary: p.summary,
+                            channel: p.channel,
+                            recipientCount: p.recipientCount,
+                            willSendCount: p.willSendCount,
+                            skippedCount: p.skippedCount,
+                            downloadUrl: p.downloadUrl,
+                            filename: p.filename,
+                            sampleRows: p.sampleRows,
+                        });
+                    });
                 } else if (tc.name === 'propose_batch_writes') {
                     if (!editingUnlocked) {
                         payload = JSON.stringify({

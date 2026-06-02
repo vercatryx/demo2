@@ -10,6 +10,8 @@
     "drivers-expo:eas-init": "npm --prefix apps/drivers-expo run eas-init",
     "drivers-expo:eas-update": "npm --prefix apps/drivers-expo run eas-update:production",
     "patch:demo-proofs": "npx tsx --env-file=.env.local scripts/patch-demo-proof-images.ts",
+    "patch:demo-order-totals": "npx tsx --env-file=.env.local scripts/patch-demo-order-items-totals.ts",
+    "patch:demo-billing": "npx tsx --env-file=.env.local scripts/patch-demo-billing.ts",
     "seed:demo": "npx tsx --env-file=.env.local scripts/seed-demo.ts",
     "seed:demo:reset": "npx tsx --env-file=.env.local scripts/seed-demo.ts --reset",
     "seed:ai-usage": "npx tsx --env-file=.env.local scripts/seed-ai-usage.ts",

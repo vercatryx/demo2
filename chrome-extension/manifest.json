@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "New DF Client Import",
-  "version": "1.1.0",
-  "description": "Add clients to the new Diet Fantasy system",
+  "name": "Client Food Service Import",
+  "version": "1.1.1",
+  "description": "Add clients to Client Food Service (demo) from Unite Us",
   "permissions": [
     "storage",
     "sidePanel",

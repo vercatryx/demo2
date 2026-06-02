@@ -3,6 +3,7 @@
 # dependencies
 /node_modules
 df ext and server/server-side-automation/node_modules
+/billing-app-demo/node_modules
 /.pnp
 .pnp.*
 .yarn/*

@@ -100,13 +100,47 @@ const CLIENT_COUNT = 1000;
 const ORDER_COUNT = 3500;
 const UPCOMING_COUNT = 400;
 const NAV_LOG_COUNT = 2000;
-const BILLING_COUNT = 2500;
+const BILLING_COUNT = 0;
 const MEAL_PLANNER_ORDER_COUNT = 2200;
 const ROUTE_DAY = 'monday';
 const DRIVERS_PER_DAY = ROUTE_ZONES.length;
 const STOPS_PER_DRIVER = 32;
 const PENDING_SCREENING_COUNT = 28;
 const ORDER_HISTORY_COUNT = 500;
+function pickClientContactFields(
+  i: number,
+  first: string,
+  last: string
+): {
+  email: string | null;
+  phone_number: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+} {
+  const email = realisticEmail(first, last, i);
+  const phone_number = realisticPhone(i);
+  const address = realisticStreet(i);
+  const city = 'Columbus';
+  const state = 'OH';
+  const zip = String(43201 + (i % 20));
+
+  // Spread gaps across the roster so mass messaging / routing demos have realistic skips.
+  const missingEmail = i % 10 === 1 || i % 10 === 6;
+  const missingPhone = i % 10 === 2 || i % 10 === 7 || i % 17 === 0;
+  const missingAddress = i % 10 === 4 || i % 13 === 5;
+
+  return {
+    email: missingEmail ? null : email,
+    phone_number: missingPhone ? null : phone_number,
+    address: missingAddress ? null : address,
+    city: missingAddress ? null : city,
+    state: missingAddress ? null : state,
+    zip: missingAddress ? null : zip,
+  };
+}
+
 function pickBillingOrderMeta(i: number): {
   status: string;
   proof: string | null;
@@ -208,6 +242,88 @@ function pickServiceType(i: number): string {
     if (r < acc) return SERVICE_TYPES[j]!;
   }
   return 'Food';
+}
+
+type MenuSeedRow = { id: string; value: number; price_each: number };
+type MealSeedRow = { id: string; price_each: number };
+
+function menuUnitPrice(row: MenuSeedRow): number {
+  return Number(row.price_each ?? row.value) || 0;
+}
+
+function mealUnitPrice(row: MealSeedRow): number {
+  return Number(row.price_each) || 0;
+}
+
+/** Build line items + totals that match what the orders UI computes from order_items / box selections. */
+function buildSeededOrderTotals(
+  serviceType: string,
+  i: number,
+  menuCatalog: MenuSeedRow[],
+  mealCatalog: MealSeedRow[],
+  boxTypePrice: number
+): { totalItems: number; totalValue: number; lineItems: Array<{
+  menu_item_id?: string | null;
+  meal_item_id?: string | null;
+  quantity: number;
+  custom_price: number;
+}>; boxItems?: Record<string, number> } {
+  const lineItems: Array<{
+    menu_item_id?: string | null;
+    meal_item_id?: string | null;
+    quantity: number;
+    custom_price: number;
+  }> = [];
+
+  if (serviceType === 'Boxes') {
+    const boxItems: Record<string, number> = {};
+    let totalItems = 0;
+    let totalValue = boxTypePrice;
+    for (let j = 0; j < 4; j++) {
+      const menu = menuCatalog[(i + j) % menuCatalog.length]!;
+      const qty = 1 + ((i + j) % 2);
+      boxItems[menu.id] = qty;
+      totalItems += qty;
+      totalValue += menuUnitPrice(menu) * qty * 0.25;
+    }
+    return {
+      totalItems: Math.max(totalItems, 4),
+      totalValue: Math.round(totalValue * 100) / 100,
+      lineItems: [],
+      boxItems,
+    };
+  }
+
+  const lineCount = 2 + (i % 3);
+  let totalItems = 0;
+  let totalValue = 0;
+
+  for (let j = 0; j < lineCount; j++) {
+    const qty = 1 + ((i + j) % 2);
+    if (serviceType === 'Meal') {
+      const meal = mealCatalog[(i + j) % mealCatalog.length]!;
+      const unit = mealUnitPrice(meal);
+      lineItems.push({ meal_item_id: meal.id, menu_item_id: null, quantity: qty, custom_price: unit });
+      totalItems += qty;
+      totalValue += unit * qty;
+    } else {
+      const menu = menuCatalog[(i + j) % menuCatalog.length]!;
+      const unit = menuUnitPrice(menu);
+      lineItems.push({ menu_item_id: menu.id, quantity: qty, custom_price: unit });
+      totalItems += qty;
+      totalValue += unit * qty;
+    }
+  }
+
+  if (serviceType === 'Equipment') {
+    return { totalItems: 1, totalValue: 65 + (i % 120), lineItems: [] };
+  }
+
+  return {
+    totalItems: Math.max(totalItems, lineCount),
+    totalValue: Math.round(Math.max(totalValue, 12) * 100) / 100,
+    lineItems,
+  };
 }
 
 function chunk<T>(arr: T[], size: number): T[][] {
@@ -334,14 +450,19 @@ async function main() {
   const catId = randomUUID();
   await db.from('item_categories').insert({ id: catId, name: 'Prepared meals', set_value: 10 });
   const menuIds: string[] = [];
+  const menuCatalog: MenuSeedRow[] = [];
   const menuRows = Array.from({ length: 120 }, (_, i) => {
     const id = randomUUID();
+    const unit = 5 + (i % 20);
     menuIds.push(id);
+    const row: MenuSeedRow = { id, value: unit, price_each: unit };
+    menuCatalog.push(row);
     return {
       id,
       vendor_id: vendorIds[i % vendorIds.length],
       name: menuItemName(i),
-      value: 5 + (i % 20),
+      value: unit,
+      price_each: unit,
       is_active: true,
       category_id: catId,
       minimum_order: 0,
@@ -356,15 +477,18 @@ async function main() {
     { id: mealCatLunch, name: 'Lunch', meal_type: 'Lunch', set_value: 1, sort_order: 1 },
   ]);
   const mealItemIds: string[] = [];
+  const mealCatalog: MealSeedRow[] = [];
   const mealItemRows = Array.from({ length: 48 }, (_, i) => {
     const id = randomUUID();
+    const price_each = 4 + (i % 12);
     mealItemIds.push(id);
+    mealCatalog.push({ id, price_each });
     return {
       id,
       category_id: i % 2 === 0 ? mealCatBreakfast : mealCatLunch,
       name: mealItemName(i),
       quota_value: 1,
-      price_each: 4 + (i % 12),
+      price_each,
       is_active: true,
       sort_order: i,
     };
@@ -396,14 +520,13 @@ async function main() {
     }))
   );
 
-  await db.from('equipment').insert(
-    ['Refrigerator', 'Microwave', 'Blender', 'Food scale', 'Insulated bag'].map((name, i) => ({
-      id: randomUUID(),
-      name,
-      price: 25 + i * 40,
-      vendor_id: vendorIds[i % vendorIds.length],
-    }))
-  );
+  const equipmentCatalog = ['Refrigerator', 'Microwave', 'Blender', 'Food scale', 'Insulated bag'].map((name, i) => ({
+    id: randomUUID(),
+    name,
+    price: 25 + i * 40,
+    vendor_id: vendorIds[i % vendorIds.length]!,
+  }));
+  await db.from('equipment').insert(equipmentCatalog);
 
   await db.from('nutritionists').insert(
     Array.from({ length: 4 }, (_, i) => ({
@@ -518,17 +641,18 @@ async function main() {
       parentPool.push(id);
     }
     const { lat, lng } = metroLatLng(i);
+    const contact = pickClientContactFields(i, first, last);
     return {
       id,
       full_name: full,
       first_name: first,
       last_name: last,
-      email: realisticEmail(first, last, i),
-      phone_number: realisticPhone(i),
-      address: realisticStreet(i),
-      city: 'Columbus',
-      state: 'OH',
-      zip: String(43201 + (i % 20)),
+      email: contact.email,
+      phone_number: contact.phone_number,
+      address: contact.address,
+      city: contact.city,
+      state: contact.state,
+      zip: contact.zip,
       lat,
       lng,
       latitude: lat,
@@ -540,7 +664,7 @@ async function main() {
       parent_client_id:
         i > 50 && i % 7 === 0 && parentPool.length > 1 ? parentPool[Math.floor(i / 7) % parentPool.length] : null,
       authorized_amount: 100 + (i % 50),
-      bill: true,
+      bill: i % 4 !== 0,
       delivery: true,
       produce_vendor_id: produceVendorId,
       upcoming_order:
@@ -563,7 +687,22 @@ async function main() {
   let orderNum = 10000;
   const orderRows: Record<string, unknown>[] = [];
   const ovsRows: { id: string; order_id: string; vendor_id: string }[] = [];
-  const oiRows: { id: string; vendor_selection_id: string; menu_item_id: string; quantity: number }[] = [];
+  const oiRows: {
+    id: string;
+    vendor_selection_id: string;
+    menu_item_id?: string | null;
+    meal_item_id?: string | null;
+    quantity: number;
+    custom_price: number;
+  }[] = [];
+  const obsRows: {
+    id: string;
+    order_id: string;
+    vendor_id: string;
+    box_type_id: string;
+    quantity: number;
+    items: Record<string, number>;
+  }[] = [];
   const orderIdsByClient = new Map<string, string[]>();
 
   const billedOrderIds: string[] = [];
@@ -571,64 +710,131 @@ async function main() {
     const orderId = randomUUID();
     const clientId = clientIds[i % clientIds.length]!;
     const vendorId = vendorIds[i % vendorIds.length]!;
+    const serviceType = pickServiceType(i);
     const billing = pickBillingOrderMeta(i);
     if (billing.billed) billedOrderIds.push(orderId);
+
+    const totals = buildSeededOrderTotals(serviceType, i, menuCatalog, mealCatalog, 45);
+    let notes: string | null = null;
+
+    if (serviceType === 'Boxes' && totals.boxItems) {
+      obsRows.push({
+        id: randomUUID(),
+        order_id: orderId,
+        vendor_id: vendorId,
+        box_type_id: boxTypeId,
+        quantity: 1,
+        items: totals.boxItems,
+      });
+    } else if (serviceType === 'Equipment') {
+      const equip = equipmentCatalog[i % equipmentCatalog.length]!;
+      notes = JSON.stringify({
+        vendorId: equip.vendor_id,
+        equipmentId: equip.id,
+        equipmentName: equip.name,
+        price: equip.price,
+      });
+    } else if (totals.lineItems.length > 0) {
+      const vsId = randomUUID();
+      ovsRows.push({ id: vsId, order_id: orderId, vendor_id: vendorId });
+      for (const line of totals.lineItems) {
+        oiRows.push({
+          id: randomUUID(),
+          vendor_selection_id: vsId,
+          menu_item_id: line.menu_item_id ?? null,
+          meal_item_id: line.meal_item_id ?? null,
+          quantity: line.quantity,
+          custom_price: line.custom_price,
+        });
+      }
+    }
+
     orderRows.push({
       id: orderId,
       client_id: clientId,
       vendor_id: vendorId,
-      service_type: pickServiceType(i),
+      service_type: serviceType,
       status: billing.status,
       scheduled_delivery_date: billing.sched,
       actual_delivery_date: billing.actual,
       proof_of_delivery_url: billing.proof,
-      total_value: 25 + (i % 40),
-      total_items: 3 + (i % 5),
+      total_value: totals.totalValue,
+      total_items: totals.totalItems,
       order_number: orderNum++,
+      notes,
     });
     if (!orderIdsByClient.has(clientId)) orderIdsByClient.set(clientId, []);
     orderIdsByClient.get(clientId)!.push(orderId);
-    const vsId = randomUUID();
-    ovsRows.push({ id: vsId, order_id: orderId, vendor_id: vendorId });
-    oiRows.push({
-      id: randomUUID(),
-      vendor_selection_id: vsId,
-      menu_item_id: menuIds[i % menuIds.length]!,
-      quantity: 1 + (i % 3),
-    });
   }
   for (const batch of chunk(orderRows, 200)) await db.from('orders').insert(batch);
   for (const batch of chunk(ovsRows, 200)) await db.from('order_vendor_selections').insert(batch);
   for (const batch of chunk(oiRows, 200)) await db.from('order_items').insert(batch);
+  for (const batch of chunk(obsRows, 200)) await db.from('order_box_selections').insert(batch);
 
   console.log(`Seeding ${UPCOMING_COUNT} upcoming orders…`);
   const upRows: Record<string, unknown>[] = [];
   const upVsRows: { id: string; upcoming_order_id: string; vendor_id: string }[] = [];
-  const upOiRows: { id: string; upcoming_vendor_selection_id: string; menu_item_id: string; quantity: number }[] = [];
+  const upOiRows: {
+    id: string;
+    upcoming_vendor_selection_id: string;
+    menu_item_id?: string | null;
+    meal_item_id?: string | null;
+    quantity: number;
+    custom_price: number;
+  }[] = [];
+  const upObsRows: {
+    id: string;
+    upcoming_order_id: string;
+    vendor_id: string;
+    box_type_id: string;
+    quantity: number;
+    items: Record<string, number>;
+  }[] = [];
+
   for (let i = 0; i < UPCOMING_COUNT; i++) {
     const upId = randomUUID();
     const vendorId = vendorIds[i % vendorIds.length]!;
+    const serviceType = pickServiceType(i);
+    const totals = buildSeededOrderTotals(serviceType, i, menuCatalog, mealCatalog, 45);
+
     upRows.push({
       id: upId,
       client_id: clientIds[i % clientIds.length],
-      service_type: pickServiceType(i),
+      service_type: serviceType,
       status: 'scheduled',
       scheduled_delivery_date: daysAhead(i % 14),
-      total_value: 30,
-      total_items: 4,
+      total_value: totals.totalValue,
+      total_items: totals.totalItems,
     });
-    const vsId = randomUUID();
-    upVsRows.push({ id: vsId, upcoming_order_id: upId, vendor_id: vendorId });
-    upOiRows.push({
-      id: randomUUID(),
-      upcoming_vendor_selection_id: vsId,
-      menu_item_id: menuIds[i % menuIds.length]!,
-      quantity: 2,
-    });
+
+    if (serviceType === 'Boxes' && totals.boxItems) {
+      upObsRows.push({
+        id: randomUUID(),
+        upcoming_order_id: upId,
+        vendor_id: vendorId,
+        box_type_id: boxTypeId,
+        quantity: 1,
+        items: totals.boxItems,
+      });
+    } else if (totals.lineItems.length > 0) {
+      const vsId = randomUUID();
+      upVsRows.push({ id: vsId, upcoming_order_id: upId, vendor_id: vendorId });
+      for (const line of totals.lineItems) {
+        upOiRows.push({
+          id: randomUUID(),
+          upcoming_vendor_selection_id: vsId,
+          menu_item_id: line.menu_item_id ?? null,
+          meal_item_id: line.meal_item_id ?? null,
+          quantity: line.quantity,
+          custom_price: line.custom_price,
+        });
+      }
+    }
   }
   for (const batch of chunk(upRows, 100)) await db.from('upcoming_orders').insert(batch);
   for (const batch of chunk(upVsRows, 100)) await db.from('upcoming_order_vendor_selections').insert(batch);
   for (const batch of chunk(upOiRows, 100)) await db.from('upcoming_order_items').insert(batch);
+  for (const batch of chunk(upObsRows, 100)) await db.from('upcoming_order_box_selections').insert(batch);
 
   console.log(`Seeding meal planner (${MEAL_PLANNER_ORDER_COUNT} orders)…`);
   const mealClients = clientMeta.filter((c) => c.serviceType === 'Food' || c.serviceType === 'Meal');
@@ -641,6 +847,27 @@ async function main() {
     const client = mealClients[o % mealClients.length]!;
     const orderId = randomUUID();
     const date = mealPlannerDateRange(o % mealClients.length)[o % 18] ?? daysAhead((o % 21) - 7);
+    const mpLines: { quantity: number; unit: number }[] = [];
+    for (let t = 0; t < 2 + (o % 2); t++) {
+      const qty = 1 + (t % 2);
+      const unit =
+        o % 3 === 0
+          ? menuUnitPrice(menuCatalog[o % menuCatalog.length]!)
+          : mealUnitPrice(mealCatalog[o % mealCatalog.length]!);
+      mpLines.push({ quantity: qty, unit });
+      mpItemRows.push({
+        id: randomUUID(),
+        meal_planner_order_id: orderId,
+        meal_type: mealTypes[(o + t) % mealTypes.length],
+        menu_item_id: o % 3 === 0 ? menuIds[o % menuIds.length] : null,
+        meal_item_id: o % 3 !== 0 ? mealItemIds[o % mealItemIds.length] : null,
+        quantity: qty,
+        custom_price: unit,
+        sort_order: t,
+      });
+    }
+    const mpTotalItems = mpLines.reduce((s, l) => s + l.quantity, 0);
+    const mpTotalValue = Math.round(mpLines.reduce((s, l) => s + l.quantity * l.unit, 0) * 100) / 100;
     mpOrderRows.push({
       id: orderId,
       client_id: client.id,
@@ -648,21 +875,10 @@ async function main() {
       status: o % 7 === 0 ? 'scheduled' : 'draft',
       scheduled_delivery_date: date,
       delivery_day: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'][o % 5],
-      total_value: 18 + (o % 25),
-      total_items: 2 + (o % 4),
+      total_value: mpTotalValue,
+      total_items: Math.max(mpTotalItems, mpLines.length),
       user_modified: o % 5 === 0,
     });
-    for (let t = 0; t < 2 + (o % 2); t++) {
-      mpItemRows.push({
-        id: randomUUID(),
-        meal_planner_order_id: orderId,
-        meal_type: mealTypes[(o + t) % mealTypes.length],
-        menu_item_id: o % 3 === 0 ? menuIds[o % menuIds.length] : null,
-        meal_item_id: o % 3 !== 0 ? mealItemIds[o % mealItemIds.length] : null,
-        quantity: 1 + (t % 2),
-        sort_order: t,
-      });
-    }
     if (o % 40 === 0) {
       mpConfigRows.push({
         id: randomUUID(),
@@ -735,18 +951,20 @@ async function main() {
   for (const batch of chunk(logRows, 200)) await db.from('navigator_logs').insert(batch);
 
   console.log(`Seeding ${BILLING_COUNT} billing records…`);
-  const billRows = Array.from({ length: BILLING_COUNT }, (_, i) => {
-    const orderId = billedOrderIds[i % billedOrderIds.length];
-    return {
-      id: randomUUID(),
-      client_id: clientIds[i % clientIds.length],
-      order_id: orderId ?? null,
-      status: i % 5 === 0 ? 'failed' : 'success',
-      amount: 20 + (i % 80),
-      navigator: navigatorName(i % 12),
-    };
-  });
-  for (const batch of chunk(billRows, 200)) await db.from('billing_records').insert(batch);
+  if (BILLING_COUNT > 0) {
+    const billRows = Array.from({ length: BILLING_COUNT }, (_, i) => {
+      const orderId = billedOrderIds[i % billedOrderIds.length];
+      return {
+        id: randomUUID(),
+        client_id: clientIds[i % clientIds.length],
+        order_id: orderId ?? null,
+        status: i % 5 === 0 ? 'failed' : 'success',
+        amount: 20 + (i % 80),
+        navigator: navigatorName(i % 12),
+      };
+    });
+    for (const batch of chunk(billRows, 200)) await db.from('billing_records').insert(batch);
+  }
 
   console.log(`Seeding ${PENDING_SCREENING_COUNT} pending screenings…`);
   const pendingClientIndices = Array.from({ length: PENDING_SCREENING_COUNT }, (_, i) => 50 + i * 17);
@@ -856,7 +1074,8 @@ async function main() {
   });
 
   console.log('Seeding AI / SMS / voice usage…');
-  const aiUsage = await seedAiUsageData(db);
+  const supaForAi = await createSupabaseSeedDb();
+  const aiUsage = await seedAiUsageData(supaForAi);
   console.log(`  usage_events: ${aiUsage.usageEvents}, SMS policies: ${aiUsage.policies}`);
 
   const portalFoodClientId = clientIds.find((_, i) => clientMeta[i]?.serviceType === 'Food') ?? clientIds[0];

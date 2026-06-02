@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { getSupabaseDbApiKey } from '@/lib/supabase-env';
 import { runAssistantTurn } from '@/lib/bot-core';
 import { answerCall, speakText, startTranscription, stopTranscription } from '@/lib/telnyx-voice';
+import { handleOutboundAnnounceWebhook, isOutboundAnnounceEvent } from '@/lib/telnyx/outbound-voice-webhook';
 
 function getSupabaseAdmin() {
   return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, getSupabaseDbApiKey()!);
@@ -128,10 +129,36 @@ export async function POST(request: Request) {
       payload?.called_number ||
       null;
 
+    const direction =
+      payload?.direction ||
+      payload?.call_direction ||
+      null;
+
+    const clientState = payload?.client_state || payload?.clientState || undefined;
+
     // Prefer storing the caller as the primary phone_number for easy lookup.
     const primaryPhone = fromNumber || toNumber;
     if (!primaryPhone) {
       return NextResponse.json({ ok: true });
+    }
+
+    if (
+      callControlId &&
+      isOutboundAnnounceEvent(eventType, direction ?? undefined, clientState)
+    ) {
+      const outboundResult = await handleOutboundAnnounceWebhook({
+        evt: eventType,
+        callControlId,
+        clientState,
+        toE164: toNumber || primaryPhone,
+      });
+      if (outboundResult.handled) {
+        return NextResponse.json({
+          ok: outboundResult.ok !== false,
+          action: outboundResult.action,
+          ...(outboundResult.error ? { error: outboundResult.error } : {}),
+        });
+      }
     }
 
     // Skip duplicate webhook deliveries

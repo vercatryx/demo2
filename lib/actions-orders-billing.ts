@@ -404,7 +404,10 @@ export async function getOrderById(orderId: string): Promise<OrderDetail | null>
                     const itemsWithDetails = (items || []).map((item: any) => {
                         let menuItem = menuItems.find((mi: any) => mi.id === item.menu_item_id);
                         if (!menuItem && item.meal_item_id) menuItem = mealItems.find((mi: any) => mi.id === item.meal_item_id);
-                        let itemPrice = item.custom_price != null ? parseFloat(item.custom_price) : (menuItem?.price_each ?? (item.unit_value != null ? parseFloat(item.unit_value) : 0));
+                        let itemPrice =
+                            item.custom_price != null
+                                ? parseFloat(item.custom_price)
+                                : (menuItem?.price_each ?? menuItem?.value ?? (item.unit_value != null ? parseFloat(item.unit_value) : 0));
                         if (Number.isNaN(itemPrice)) itemPrice = 0;
                         const qty = item.quantity ?? 1;
                         const menuItemName = item.custom_name || menuItem?.name || item.notes || 'Unknown Item';
