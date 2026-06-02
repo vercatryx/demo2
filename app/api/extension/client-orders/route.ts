@@ -157,6 +157,35 @@ function effectiveOrderDate(row: any): string {
     return row.actual_delivery_date || row.scheduled_delivery_date || row.created_at || '';
 }
 
+const ORDER_SELECT_MINIMAL =
+    'id, client_id, order_number, status, service_type, scheduled_delivery_date, actual_delivery_date, created_at, total_value, proof_of_delivery_url, notes';
+
+const ORDER_SELECT_WITH_PROOF_ARRAY = `${ORDER_SELECT_MINIMAL}, proof_of_delivery_urls`;
+
+async function fetchOrdersForClientIds(clientIds: string[], limit: number) {
+    const withArray = await supabase
+        .from('orders')
+        .select(ORDER_SELECT_WITH_PROOF_ARRAY)
+        .in('client_id', clientIds)
+        .order('created_at', { ascending: false })
+        .limit(limit * 3);
+    if (!withArray.error) return withArray.data ?? [];
+
+    const msg = withArray.error.message || '';
+    if (!/proof_of_delivery_urls|proof_of_delivery_image/i.test(msg)) {
+        throw new Error(withArray.error.message);
+    }
+
+    const minimal = await supabase
+        .from('orders')
+        .select(ORDER_SELECT_MINIMAL)
+        .in('client_id', clientIds)
+        .order('created_at', { ascending: false })
+        .limit(limit * 3);
+    if (minimal.error) throw new Error(minimal.error.message);
+    return minimal.data ?? [];
+}
+
 async function loadOrdersForClient(client: any, limit: number) {
     const clientIds = [client.id];
     const { data: dependents } = await supabase
@@ -171,16 +200,9 @@ async function loadOrdersForClient(client: any, limit: number) {
         dependentNames[dep.id] = dep.full_name || 'Dependent';
     });
 
-    const { data: orders, error: ordersError } = await supabase
-        .from('orders')
-        .select('id, client_id, order_number, status, service_type, scheduled_delivery_date, actual_delivery_date, created_at, total_value, proof_of_delivery_url, proof_of_delivery_image, notes')
-        .in('client_id', clientIds)
-        .order('created_at', { ascending: false })
-        .limit(limit * 3);
+    const orders = await fetchOrdersForClientIds(clientIds, limit);
 
-    if (ordersError) throw new Error(ordersError.message);
-
-    const sortedOrders = (orders || [])
+    const sortedOrders = orders
         .slice()
         .sort((a, b) => {
             const da = effectiveOrderDate(a);
