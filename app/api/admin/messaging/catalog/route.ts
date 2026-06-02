@@ -18,7 +18,7 @@ export async function GET() {
             supabase.from('breakfast_items').select('id, name').order('name'),
             supabase
                 .from('menu_items')
-                .select('id, name, item_number')
+                .select('id, name')
                 .is('vendor_id', null)
                 .eq('is_active', true)
                 .order('name'),
@@ -49,7 +49,7 @@ export async function GET() {
             boxItems: (boxItemsRes.data ?? []).map((bi) => ({
                 id: bi.id,
                 name: bi.name,
-                itemNumber: bi.item_number ?? null,
+                itemNumber: null,
             })),
         };
 
