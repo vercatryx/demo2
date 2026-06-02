@@ -173,7 +173,7 @@ async function loadOrdersForClient(client: any, limit: number) {
 
     const { data: orders, error: ordersError } = await supabase
         .from('orders')
-        .select('id, client_id, order_number, status, service_type, scheduled_delivery_date, actual_delivery_date, created_at, total_value, proof_of_delivery_url, proof_of_delivery_urls, notes')
+        .select('id, client_id, order_number, status, service_type, scheduled_delivery_date, actual_delivery_date, created_at, total_value, proof_of_delivery_url, proof_of_delivery_image, notes')
         .in('client_id', clientIds)
         .order('created_at', { ascending: false })
         .limit(limit * 3);
