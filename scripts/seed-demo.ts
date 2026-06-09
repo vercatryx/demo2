@@ -922,11 +922,12 @@ async function main() {
   for (let i = 0; i < Math.min(500, mealClients.length); i++) {
     const c = mealClients[i]!;
     const dates = mealPlannerDateRange(i);
-    const meal_planner_data = dates.map((d) => ({
+    const meal_planner_data = dates.map((d, dayIdx) => ({
       scheduledDeliveryDate: d,
       items: [
-        { mealType: 'Breakfast', name: mealItemName(i), quantity: 1 },
-        { mealType: 'Lunch', name: menuItemName(i), quantity: 1 },
+        { mealType: 'Breakfast', name: mealItemName(i + dayIdx), quantity: 1 + (dayIdx % 2), value: 1 + (i % 2) },
+        { mealType: 'Lunch', name: menuItemName(i + dayIdx), quantity: 1 + ((i + dayIdx) % 3), value: 1 },
+        { mealType: 'Dinner', name: mealItemName(i + dayIdx + 1), quantity: 1, value: 2 },
       ],
     }));
     const { error } = await db
@@ -1079,12 +1080,18 @@ async function main() {
   console.log(`  usage_events: ${aiUsage.usageEvents}, SMS policies: ${aiUsage.policies}`);
 
   const portalFoodClientId = clientIds.find((_, i) => clientMeta[i]?.serviceType === 'Food') ?? clientIds[0];
-  const portalClassicClientId = clientIds.find((_, i) => clientMeta[i]?.serviceType === 'Meal') ?? clientIds[1];
+  const portalClassicFoodClientId =
+    clientIds.find((_, i) => clientMeta[i]?.serviceType === 'Food') ??
+    clientIds.find((_, i) => clientMeta[i]?.serviceType === 'Meal') ??
+    clientIds[0];
+  const portalClassicBoxesClientId =
+    clientIds.find((_, i) => clientMeta[i]?.serviceType === 'Boxes') ?? clientIds[2];
 
   console.log('Done. Demo seed complete.');
   console.log(`Routes: /routes — date ${deliveryDate}, day ${ROUTE_DAY} (${DRIVERS_PER_DAY} zone routes)`);
-  console.log(`Portal (meal plan): /client-portal/${portalFoodClientId}`);
-  console.log(`Portal (classic):   /client-portal-triangle/${portalClassicClientId}`);
+  console.log(`Portal (meal plan):       /client-portal/${portalFoodClientId}`);
+  console.log(`Portal (classic · food):  /client-portal-triangle/${portalClassicFoodClientId}`);
+  console.log(`Portal (classic · boxes): /client-portal-triangle/${portalClassicBoxesClientId}`);
   console.log('Login:', process.env.ENV_ADMIN_USERNAME || 'admin', '/', process.env.ENV_ADMIN_PASSWORD || '12345');
   if ('end' in db && typeof db.end === 'function') await db.end();
 }

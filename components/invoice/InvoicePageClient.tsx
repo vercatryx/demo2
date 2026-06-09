@@ -175,7 +175,7 @@ export function InvoicePageClient({ brooklynOnly }: Props) {
         setPdfBusy(true);
         setError(null);
         try {
-            const base = `invoice-${invoice.clientId.slice(0, 8)}-${invoice.periodFrom}-to-${invoice.periodTo}`;
+            const base = `invoice-${invoice.clientName}-${invoice.periodFrom}-to-${invoice.periodTo}`;
             await downloadInvoicePdfFromElement(el, base);
         } catch (e) {
             console.error('[invoice PDF]', e);
@@ -246,7 +246,7 @@ export function InvoicePageClient({ brooklynOnly }: Props) {
                                 onClick={() => void onPickHousehold(h.rootId)}
                                 disabled={loading}
                             >
-                                Account {h.rootId.slice(0, 8)}
+                                {h.label}
                                 <span className={styles.pickId}> · {h.rootId}</span>
                             </button>
                         ))}

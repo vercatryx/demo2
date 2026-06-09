@@ -1,15 +1,17 @@
 {
   "name": "client-food-service-billing-demo",
-  "version": "2.5.0006-demo",
+  "version": "2.5.7",
   "description": "Client Food Service billing automation demo (Playwright)",
   "author": "POEL AI <info@poel.ai>",
   "main": "electron-main.js",
   "scripts": {
     "start": "node src/server.js",
     "electron": "electron .",
+    "open:mac": "open dist/mac-arm64/*.app 2>/dev/null || open dist/mac/*.app",
     "install-browsers": "cross-env PLAYWRIGHT_BROWSERS_PATH=./playwright-browsers npx playwright install chromium",
     "postinstall": "node scripts/postinstall-playwright.js",
-    "pack:mac": "npm run install-browsers && electron-builder --mac",
+    "pack:mac": "npm run install-browsers && PATH=\"$(pwd)/scripts/build-bin:$PATH\" electron-builder --mac",
+    "pack:mac:app": "npm run install-browsers && electron-builder --mac dir",
     "pack:win": "npm run install-browsers && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win",
     "dist": "npm run install-browsers && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder",
     "restart": "node restart.js",
@@ -53,8 +55,10 @@
     "mac": {
       "category": "public.app-category.utilities",
       "target": [
-        "dmg"
-      ]
+        "dmg",
+        "dir"
+      ],
+      "identity": null
     },
     "win": {
       "signAndEditExecutable": false,

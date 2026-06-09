@@ -290,7 +290,7 @@ export default function MealPlanEditsPage() {
 
       <div className={styles.layout}>
         <section className={styles.calendarSection} aria-label="Calendar">
-          <div className={calendarStyles.mealPlannerCalendar}>
+          <div className={`${calendarStyles.mealPlannerCalendar} ${styles.calendarWidget}`}>
             <div className={calendarStyles.calendarHeader}>
               <button
                 type="button"

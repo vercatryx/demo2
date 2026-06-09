@@ -91,13 +91,18 @@ export default async function middleware(request: NextRequest) {
       return supabaseRes;
     }
 
-    // Clients: only their own portal (and /sign/). No other clients, no admin routes.
+    // Clients: only their own portal (meal plan or classic) and /sign/.
     if (session.role === 'client') {
-      const ownPortalBase = `/client-portal/${session.userId}`;
-      const isOwnPortal = path === ownPortalBase || path.startsWith(ownPortalBase + '/');
+      const ownMealPlanPortal = `/client-portal/${session.userId}`;
+      const ownClassicPortal = `/client-portal-triangle/${session.userId}`;
+      const isOwnPortal =
+        path === ownMealPlanPortal ||
+        path.startsWith(ownMealPlanPortal + '/') ||
+        path === ownClassicPortal ||
+        path.startsWith(ownClassicPortal + '/');
       const isSignRoute = path.startsWith('/sign/');
       if (!isOwnPortal && !isSignRoute) {
-        return redirectWithSb(new URL(ownPortalBase, request.url));
+        return redirectWithSb(new URL(ownMealPlanPortal, request.url));
       }
       return supabaseRes;
     }

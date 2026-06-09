@@ -15,8 +15,15 @@ import { ClientPortalClassicInterface } from '@/components/clients/ClientPortalC
 import { StaffClientPortalStatusAcknowledgement } from '@/components/clients/StaffClientPortalStatusAcknowledgement';
 import { getSession } from '@/lib/session';
 import { notFound, redirect } from 'next/navigation';
-import { getClient } from '@/lib/actions';
+import { getClient, getDependentsByParentId } from '@/lib/actions';
 import type { Metadata } from 'next';
+import {
+  getMealPlanClientPortalPath,
+  resolveClientPortalPath,
+  shouldRedirectMealPlanPortalFromClassicRoute,
+} from '@/lib/client-portal-routing';
+import { isFoodOrMealHouseholdMember } from '@/lib/meal-dependant-portal-login';
+import { supabase } from '@/lib/supabase';
 
 function ClientPortalAccessDenied({ statusLabel }: { statusLabel: string }) {
   return (
@@ -68,7 +75,12 @@ export default async function ClientPortalTrianglePage({ params }: Props) {
   }
 
   if (session.role === 'client' && session.userId !== id) {
-    redirect(`/client-portal-triangle/${session.userId}`);
+    const { data: clientRow } = await supabase
+      .from('clients')
+      .select('service_type')
+      .eq('id', session.userId)
+      .maybeSingle();
+    redirect(await resolveClientPortalPath(supabase, session.userId, clientRow?.service_type));
   } else if (session.role === 'vendor') {
     redirect('/vendor');
   }
@@ -104,6 +116,24 @@ export default async function ClientPortalTrianglePage({ params }: Props) {
 
   if (!client) {
     notFound();
+  }
+
+  const parentId = client.parentClientId ?? client.id;
+  const dependants =
+    parentId === client.id
+      ? await getDependentsByParentId(parentId, { includeArchived: !!client.archivedAt })
+      : [];
+  const householdPeople = [client, ...dependants].filter(
+    (p) => p && isFoodOrMealHouseholdMember(p.serviceType)
+  );
+  if (
+    shouldRedirectMealPlanPortalFromClassicRoute(
+      client.serviceType,
+      householdPeople.length > 0,
+      session.role
+    )
+  ) {
+    redirect(getMealPlanClientPortalPath(id));
   }
 
   const activeVendors = vendors.filter((v) => v.isActive !== false);

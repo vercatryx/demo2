@@ -1,5 +1,6 @@
 ﻿node_modules/
 playwright-browsers/
+dist/
 .env
 server.log
 downloaded_clients.json

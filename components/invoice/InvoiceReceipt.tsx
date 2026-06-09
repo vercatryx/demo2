@@ -15,14 +15,21 @@ import styles from './invoice-receipt.module.css';
 /** Body rows so the sheet reads as a full A4 page before PDF scaling. */
 const MIN_TABLE_BODY_ROWS = 34;
 
+function splitAddress(addr: string): string[] {
+    const t = (addr || '').trim();
+    if (!t) return [];
+    const parts = t.split(/\n|,/).map((s) => s.trim()).filter(Boolean);
+    return parts.length ? parts : [t];
+}
+
 type Props = {
     invoice: ClientInvoiceApiPayload;
 };
 
 export const InvoiceReceipt = forwardRef<HTMLDivElement, Props>(function InvoiceReceipt({ invoice }, ref) {
     const footerLine = invoiceOrgFooterTagline();
+    const addrLines = splitAddress(invoice.clientAddress);
     const padCount = Math.max(0, MIN_TABLE_BODY_ROWS - 1);
-    const accountRef = invoice.clientId.slice(0, 8).toUpperCase();
     const fixedLine =
         invoice.invoiceFixedLine ??
         getClientInvoiceFixedLine(invoice.produceInvoice === true, invoice.householdMemberCount ?? 1);
@@ -56,14 +63,19 @@ export const InvoiceReceipt = forwardRef<HTMLDivElement, Props>(function Invoice
                             </div>
                         </div>
                         <aside className={styles.deliverySide}>
-                            <div className={styles.deliverySideTitle}>Account</div>
-                            <div className={styles.deliveryName}>Ref. {accountRef}</div>
-                            <div className={styles.deliveryAddressMuted}>
-                                Household size: {Math.max(1, invoice.householdMemberCount ?? 1)} member
-                                {(invoice.householdMemberCount ?? 1) !== 1 ? 's' : ''}
-                            </div>
-                            <div className={styles.deliveryAddressMuted} style={{ marginTop: '0.5rem' }}>
-                                Name, address, and phone are omitted on demo invoices.
+                            <div className={styles.deliverySideTitle}>Delivery address</div>
+                            <div className={styles.deliveryName}>{invoice.clientName}</div>
+                            {addrLines.length > 0 ? (
+                                <div className={styles.deliveryAddress}>
+                                    {addrLines.map((line, i) => (
+                                        <div key={i}>{line}</div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className={styles.deliveryAddressMuted}>No address on file</div>
+                            )}
+                            <div className={styles.deliveryPhone}>
+                                {invoice.clientPhone?.trim() ? invoice.clientPhone : '—'}
                             </div>
                         </aside>
                     </div>

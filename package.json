@@ -12,6 +12,7 @@
     "patch:demo-proofs": "npx tsx --env-file=.env.local scripts/patch-demo-proof-images.ts",
     "patch:demo-order-totals": "npx tsx --env-file=.env.local scripts/patch-demo-order-items-totals.ts",
     "patch:demo-billing": "npx tsx --env-file=.env.local scripts/patch-demo-billing.ts",
+    "patch:demo-meal-plan": "npx tsx --env-file=.env.local scripts/patch-demo-meal-plan.ts",
     "seed:demo": "npx tsx --env-file=.env.local scripts/seed-demo.ts",
     "seed:demo:reset": "npx tsx --env-file=.env.local scripts/seed-demo.ts --reset",
     "seed:ai-usage": "npx tsx --env-file=.env.local scripts/seed-ai-usage.ts",

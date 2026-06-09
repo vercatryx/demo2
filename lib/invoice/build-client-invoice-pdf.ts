@@ -38,7 +38,7 @@ function sanitizeFilenameBase(name: string): string {
 }
 
 export function buildClientInvoicePdfFilename(payload: ClientInvoiceApiPayload): string {
-    const base = sanitizeFilenameBase(`invoice-${payload.clientId.slice(0, 8)}-${payload.periodFrom}-to-${payload.periodTo}`);
+    const base = sanitizeFilenameBase(`invoice-${payload.clientName}-${payload.periodFrom}-to-${payload.periodTo}`);
     const suffix = payload.produceInvoice ? '-produce' : '';
     return `${base}${suffix}.pdf`;
 }
@@ -139,9 +139,9 @@ export function buildClientInvoicePdfBytes(payload: ClientInvoiceApiPayload): Ui
     const leftX = m;
     const rightX = m + cardW + gap;
 
-    const accountRef = payload.clientId.slice(0, 8).toUpperCase();
-    const householdLine = `Household: ${Math.max(1, payload.householdMemberCount ?? 1)} member(s)`;
-    const demoNote = 'Name, address, and phone omitted (demo).';
+    const addr = (payload.clientAddress || '').trim();
+    const addrParts = addr ? addr.split(/\n|,/).map((s) => s.trim()).filter(Boolean) : [];
+    const addrBlock = addrParts.length ? addrParts.join('\n') : 'No address on file';
 
     const innerTextW = cardW - cardPad * 2 - 2;
 
@@ -154,8 +154,8 @@ export function buildClientInvoicePdfBytes(payload: ClientInvoiceApiPayload): Ui
     };
     const measureRightH = (): number => {
         let cy = cardTop + cardPad + 1 + 4.5 + 6;
-        cy += doc.splitTextToSize(pdfAscii(householdLine), innerTextW).length * 4.3;
-        cy += doc.splitTextToSize(pdfAscii(demoNote), innerTextW).length * 4.4;
+        cy += doc.splitTextToSize(pdfAscii(addrBlock), innerTextW).length * 4.3;
+        cy += doc.splitTextToSize(pdfAscii(payload.clientPhone?.trim() || '—'), innerTextW).length * 4.4;
         return cy - cardTop + cardPad + 2;
     };
 
@@ -203,21 +203,23 @@ export function buildClientInvoicePdfBytes(payload: ClientInvoiceApiPayload): Ui
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(6.5);
     setText(doc, C.accent);
-    doc.text('ACCOUNT', rightX + cardPad + 2, ry);
+    doc.text('DELIVERY ADDRESS', rightX + cardPad + 2, ry);
     ry += 4.5;
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
     setText(doc, C.ink);
-    doc.text(pdfAscii(`Ref. ${accountRef}`), rightX + cardPad + 2, ry);
+    doc.text(pdfAscii(payload.clientName), rightX + cardPad + 2, ry);
     ry += 6;
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
     setText(doc, C.inkMuted);
-    for (const ln of doc.splitTextToSize(pdfAscii(householdLine), innerTextW)) {
+    for (const ln of doc.splitTextToSize(pdfAscii(addrBlock), innerTextW)) {
         doc.text(ln, rightX + cardPad + 2, ry);
         ry += 4.3;
     }
-    for (const ln of doc.splitTextToSize(pdfAscii(demoNote), innerTextW)) {
+    doc.setFontSize(9.5);
+    setText(doc, C.ink);
+    for (const ln of doc.splitTextToSize(pdfAscii(payload.clientPhone?.trim() || '—'), innerTextW)) {
         doc.text(ln, rightX + cardPad + 2, ry);
         ry += 4.4;
     }

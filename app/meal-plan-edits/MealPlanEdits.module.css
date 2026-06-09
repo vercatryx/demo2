@@ -22,7 +22,7 @@
 
 .layout {
   display: grid;
-  grid-template-columns: minmax(280px, 400px) 1fr;
+  grid-template-columns: minmax(400px, 520px) 1fr;
   gap: var(--spacing-xl, 2rem);
   align-items: start;
 }
@@ -36,6 +36,19 @@
 .calendarSection {
   position: sticky;
   top: 1rem;
+}
+
+.calendarSection .calendarWidget {
+  width: 100%;
+  max-width: 520px;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+@media (max-width: 768px) {
+  .calendarSection .calendarWidget {
+    max-width: 100%;
+  }
 }
 
 /* Green highlight for days that have meal plan edits */

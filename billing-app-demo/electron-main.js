@@ -93,7 +93,7 @@ function createWindow(port) {
     const win = new BrowserWindow({
         width: 1400,
         height: 820,
-        title: 'Diet Fantasy Billing',
+        title: 'Client Food Service Billing',
         icon: fs.existsSync(iconPath) ? iconPath : undefined,
         autoHideMenuBar: true,
         webPreferences: {
@@ -101,7 +101,7 @@ function createWindow(port) {
             contextIsolation: true,
         },
     });
-    win.setTitle('Diet Fantasy Billing');
+    win.setTitle('Client Food Service Billing');
     win.loadURL(`http://localhost:${port}`);
     win.on('closed', () => {
         app.quit();

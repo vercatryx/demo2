@@ -13,6 +13,7 @@ import { geocodeOneClient } from '@/lib/geocodeOneClient';
 import { formatDateTimeInAppTz } from '@/lib/timezone';
 import { diffObjects } from '@/lib/audit/clientDiff';
 import { inferChangeKindFromAuditDiffs } from '@/lib/audit/clientChangeKind';
+import { getStaffClientShelfPortalPath } from '@/lib/client-portal-routing';
 import styles from './ClientInfoShelf.module.css';
 
 interface DependantInfoShelfProps {
@@ -398,11 +399,11 @@ export function DependantInfoShelf({
                                     </div>
                                 ) : null}
                                 <Link
-                                    href={`/client-portal/${client.id}`}
+                                    href={getStaffClientShelfPortalPath(client.id, client.serviceType)}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className={styles.portalLink}
-                                    title="Open client portal"
+                                    title="Open client portal (Triangle classic)"
                                 >
                                     {client.id}
                                 </Link>

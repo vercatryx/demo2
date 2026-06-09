@@ -23,6 +23,7 @@ import FormFiller from '@/components/forms/FormFiller';
 import { FormSchema } from '@/lib/form-types';
 import { diffObjects } from '@/lib/audit/clientDiff';
 import { inferChangeKindFromAuditDiffs } from '@/lib/audit/clientChangeKind';
+import { getStaffClientShelfPortalPath } from '@/lib/client-portal-routing';
 import styles from './ClientInfoShelf.module.css';
 
 interface ClientInfoShelfProps {
@@ -601,11 +602,11 @@ export function ClientInfoShelf({
                                     </div>
                                 ) : null}
                                 <Link
-                                    href={`/client-portal/${client.id}`}
+                                    href={getStaffClientShelfPortalPath(client.id, client.serviceType)}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className={styles.portalLink}
-                                    title="Open client portal"
+                                    title="Open client portal (Triangle classic)"
                                 >
                                     {client.id}
                                 </Link>

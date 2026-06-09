@@ -10,6 +10,7 @@ import { getSettings } from './actions';
 import { sendEmail } from './email';
 import { isProduceServiceType } from './isProduceServiceType';
 import { householdHasFoodOrMealPortalMember } from './meal-dependant-portal-login';
+import { resolveClientPortalPath } from './client-portal-routing';
 import { signAccountPickToken, verifyAccountPickToken } from './login-account-pick-token';
 import { getAllClientNumbers, normalizePhone } from './phone-utils';
 import { sendSms } from './telnyx';
@@ -528,7 +529,7 @@ async function completeLoginFromMatch(match: IdentityMatch & { id?: string }, em
             throw new Error('PRODUCE_PORTAL_BLOCKED');
         }
         await createSession(match.id, clientRow?.full_name || 'Client', 'client');
-        redirect(`/client-portal/${match.id}`);
+        redirect(await resolveClientPortalPath(supabase, match.id, clientRow?.service_type));
     }
 }
 

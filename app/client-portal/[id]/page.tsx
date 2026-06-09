@@ -8,6 +8,12 @@ import { APP_LOGO_PATH } from '@/lib/brand';
 import type { Metadata } from 'next';
 import { getSession } from '@/lib/session';
 import { isProduceServiceType } from '@/lib/isProduceServiceType';
+import {
+  getClassicClientPortalPath,
+  resolveClientPortalPath,
+  usesMealPlanClientPortal,
+} from '@/lib/client-portal-routing';
+import { supabase } from '@/lib/supabase';
 
 type Props = { params: Promise<{ id: string }> };
 
@@ -24,7 +30,12 @@ export default async function ClientPortalPage({ params }: Props) {
   // Clients may only view their own portal — redirect to their page if they try another
   const session = await getSession();
   if (session?.role === 'client' && session.userId !== id) {
-    redirect(`/client-portal/${session.userId}`);
+    const { data: clientRow } = await supabase
+      .from('clients')
+      .select('service_type')
+      .eq('id', session.userId)
+      .maybeSingle();
+    redirect(await resolveClientPortalPath(supabase, session.userId, clientRow?.service_type));
   }
 
   const payload = await getClientPortalPageData(id);
@@ -33,6 +44,11 @@ export default async function ClientPortalPage({ params }: Props) {
   }
 
   const { client, householdPeople, statuses, navigators, vendors, menuItems, boxTypes, categories, activeOrder, previousOrders, mealPlanData } = payload;
+
+  // Meal / Boxes / etc. use the classic upcoming-order portal — not the day-based meal plan UI.
+  if (!usesMealPlanClientPortal(client.serviceType, householdPeople.length > 0)) {
+    redirect(getClassicClientPortalPath(id));
+  }
 
   // Produce-only households (no Food/Meal members) cannot use the meal-plan client portal
   if (isProduceServiceType(client.serviceType) && householdPeople.length === 0) {

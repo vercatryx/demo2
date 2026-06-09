@@ -11,7 +11,7 @@ export default async function PortalPreviewDietcomboPage() {
   const { data } = await sb
     .from('clients')
     .select('id')
-    .in('service_type', ['Food', 'Meal'])
+    .eq('service_type', 'Food')
     .limit(1)
     .maybeSingle();
   if (data?.id) redirect(`/client-portal/${data.id}`);
