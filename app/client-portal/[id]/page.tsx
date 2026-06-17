@@ -3,8 +3,6 @@ import { ClientPortalInterface } from '@/components/clients/ClientPortalInterfac
 import { notFound, redirect } from 'next/navigation';
 import { logout } from '@/lib/auth-actions';
 import { LogOut } from 'lucide-react';
-import Image from 'next/image';
-import { APP_LOGO_PATH } from '@/lib/brand';
 import type { Metadata } from 'next';
 import { getSession } from '@/lib/session';
 import { isProduceServiceType } from '@/lib/isProduceServiceType';
@@ -107,9 +105,8 @@ export default async function ClientPortalPage({ params }: Props) {
   return (
     <div style={{ padding: '20px' }}>
       <div style={{ marginBottom: '20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <Image src={APP_LOGO_PATH} alt="Logo" width={40} height={40} style={{ objectFit: 'contain' }} priority />
-          <h1 style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>Client Portal</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <h1 style={{ fontSize: '1.25rem', fontWeight: 600, letterSpacing: '-0.025em', margin: 0 }}>Client portal</h1>
         </div>
         <form action={logout}>
           <button

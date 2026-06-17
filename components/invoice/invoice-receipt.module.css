@@ -1,4 +1,4 @@
-/* Invoice: white A4 sheet; green as accent only */
+/* Invoice: white A4 sheet; brand blue accent */
 
 .receiptA4Frame {
     width: 210mm;
@@ -34,8 +34,8 @@
 .receiptHeader {
     margin: -18px -20px 22px;
     padding: 18px 20px 16px;
-    background: linear-gradient(165deg, #d1fae5 0%, #ecfdf5 38%, #ffffff 100%);
-    border-bottom: 1px solid #cbd5e1;
+    background: #ffffff;
+    border-bottom: 1px solid #e2e8f0;
 }
 
 .headerTop {
@@ -62,7 +62,7 @@
     font-size: 1.75rem;
     font-weight: 800;
     letter-spacing: 0.04em;
-    color: #15803d;
+    color: #1d4ed8;
     line-height: 1.1;
 }
 
@@ -111,7 +111,7 @@
     display: flex;
     flex-direction: column;
     justify-content: center;
-    box-shadow: inset 3px 0 0 #15803d;
+    box-shadow: inset 3px 0 0 #1d4ed8;
 }
 
 .boxDivider {
@@ -145,7 +145,7 @@
     display: flex;
     flex-direction: column;
     justify-content: flex-start;
-    box-shadow: inset 3px 0 0 #15803d;
+    box-shadow: inset 3px 0 0 #1d4ed8;
 }
 
 .deliverySideTitle {
@@ -297,8 +297,8 @@
     padding-bottom: 4px;
     font-weight: 800;
     font-size: 0.95rem;
-    background: #dcfce7;
-    border-top: 2px solid #15803d;
+    background: var(--color-success-soft);
+    border-top: 2px solid #1d4ed8;
     color: #0f172a;
 }
 
@@ -314,14 +314,14 @@
     margin-right: -20px;
     margin-bottom: -22px;
     padding: 18px 20px 20px;
-    background: linear-gradient(180deg, #ffffff 0%, #ecfdf5 55%, #d1fae5 100%);
-    border-top: 1px solid #bbf7d0;
+    background: linear-gradient(180deg, #ffffff 0%, #eff6ff 55%, #eff6ff 100%);
+    border-top: 1px solid #bfdbfe;
 }
 
 .footerBrand {
     margin: 0 0 10px;
     font-size: 0.95rem;
-    color: #15803d;
+    color: #1d4ed8;
     font-weight: 500;
     font-style: italic;
     text-align: center;

@@ -3,8 +3,6 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { verifyOtp } from '@/lib/auth-actions';
-import Image from 'next/image';
-import { APP_BRAND_NAME, APP_LOGO_PATH } from '@/lib/brand';
 import styles from '../page.module.css';
 
 export default function VerifyLoginPage() {
@@ -70,16 +68,6 @@ export default function VerifyLoginPage() {
         <div className={styles.container}>
             <div className={styles.card}>
                 <div className="text-center">
-                    <div className={styles.logoContainer}>
-                        <Image
-                            src={APP_LOGO_PATH}
-                            alt={`${APP_BRAND_NAME} logo`}
-                            width={200}
-                            height={200}
-                            className={styles.logo}
-                            priority
-                        />
-                    </div>
                     <h2 className={styles.title}>Verify Your Login</h2>
                     <p className={styles.subtitle}>
                         Enter the code sent to your email to complete login

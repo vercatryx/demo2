@@ -4785,7 +4785,7 @@ export const ClientProfileDetail = forwardRef<ClientProfileDetailHandle, Props>(
                                     className="btn btn-secondary"
                                     onClick={() => void handleRestoreArchived()}
                                     disabled={restoringArchived}
-                                    style={{ marginRight: '8px', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600, color: '#15803d', borderColor: '#86efac' }}
+                                    style={{ marginRight: '8px', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600, color: '#1d4ed8', borderColor: '#93c5fd' }}
                                     title="Restore to the active client list"
                                 >
                                     {restoringArchived ? <Loader2 size={16} className="spin" /> : <RotateCcw size={16} />}
@@ -5329,8 +5329,8 @@ export const ClientProfileDetail = forwardRef<ClientProfileDetailHandle, Props>(
                                         backgroundColor: (() => {
                                             const status = client?.screeningStatus || 'not_started';
                                             switch (status) {
-                                                case 'waiting_approval': return 'rgba(72, 190, 133, 0.1)';
-                                                case 'approved': return 'rgba(34, 197, 94, 0.1)';
+                                                case 'waiting_approval': return 'rgba(37, 99, 235, 0.1)';
+                                                case 'approved': return 'rgba(37, 99, 235, 0.1)';
                                                 case 'rejected': return 'rgba(239, 68, 68, 0.1)';
                                                 default: return 'var(--bg-surface-hover)';
                                             }
@@ -5338,7 +5338,7 @@ export const ClientProfileDetail = forwardRef<ClientProfileDetailHandle, Props>(
                                         color: (() => {
                                             const status = client?.screeningStatus || 'not_started';
                                             switch (status) {
-                                                case 'waiting_approval': return '#48be85';
+                                                case 'waiting_approval': return 'var(--color-brand-600)';
                                                 case 'approved': return 'var(--color-success)';
                                                 case 'rejected': return 'var(--color-danger)';
                                                 default: return 'var(--text-tertiary)';

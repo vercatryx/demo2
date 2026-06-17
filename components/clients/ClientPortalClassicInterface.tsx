@@ -971,10 +971,10 @@ export function ClientPortalClassicInterface({
     let bottomBarShadow = '0 -4px 20px -8px rgba(15, 23, 42, 0.08)';
     let bottomBarTextColor = '#475569';
     if (saving) {
-        bottomBarBg = '#d1fae5';
-        bottomBarBorder = '#10b981';
+        bottomBarBg = '#eff6ff';
+        bottomBarBorder = '#2563eb';
         bottomBarShadow = '0 -10px 30px -5px rgba(16, 185, 129, 0.35)';
-        bottomBarTextColor = '#065f46';
+        bottomBarTextColor = '#1d4ed8';
     } else if (saveError) {
         bottomBarBg = '#fef2f2';
         bottomBarBorder = '#dc2626';

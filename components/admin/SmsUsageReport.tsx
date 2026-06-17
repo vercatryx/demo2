@@ -308,7 +308,7 @@ export function SmsUsageReport() {
                       marginBottom: '0.85rem',
                       padding: '0.65rem 0.75rem',
                       borderRadius: 8,
-                      background: row.role === 'user' ? 'var(--bg-surface-hover)' : 'rgba(34, 197, 94, 0.08)',
+                      background: row.role === 'user' ? 'var(--bg-surface-hover)' : 'rgba(37, 99, 235, 0.08)',
                       border: '1px solid var(--border-color)',
                     }}
                   >

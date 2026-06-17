@@ -61,7 +61,7 @@ export default function Error({
           onClick={reset}
           style={{
             padding: '0.5rem 1rem',
-            background: 'var(--color-primary, #48be85)',
+            background: 'var(--color-brand-600)',
             color: '#fff',
             border: 'none',
             borderRadius: '0.5rem',

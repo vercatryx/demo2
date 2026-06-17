@@ -439,7 +439,7 @@ const styles = StyleSheet.create({
     outlineTxt: { fontWeight: '700', color: '#111' },
     center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24, backgroundColor: '#fff' },
     muted: { marginTop: 10, color: '#6b7280', textAlign: 'center' },
-    ok: { fontSize: 22, fontWeight: '800', color: '#16a34a' },
+    ok: { fontSize: 22, fontWeight: '800', color: '#2563eb' },
     err: { fontSize: 20, fontWeight: '800', color: '#dc2626' },
     errBody: { color: '#991b1b', marginTop: 8, textAlign: 'center' },
 });

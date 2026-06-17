@@ -1,0 +1,57 @@
+.pageHeaderMain {
+  min-width: 0;
+}
+
+.pageHeaderBadge {
+  margin-left: 0.5rem;
+  vertical-align: middle;
+}
+
+.sectionCardActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.emptyStateInset {
+  padding: 2.5rem 1.5rem;
+}
+
+.emptyStateAction {
+  margin-top: 0.75rem;
+}
+
+.alertContent {
+  min-width: 0;
+  flex: 1;
+}
+
+.avatar {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px transparent;
+}
+
+.avatarXs { width: 1.5rem; height: 1.5rem; font-size: 0.5625rem; }
+.avatarSm { width: 2rem; height: 2rem; font-size: 0.6875rem; }
+.avatarMd { width: 2.5rem; height: 2.5rem; font-size: 0.8125rem; }
+.avatarLg { width: 3rem; height: 3rem; font-size: 1rem; }
+
+.avatarSquare {
+  border-radius: var(--radius-lg);
+}
+
+.avatarRed { background: #fef2f2; color: #b91c1c; box-shadow: inset 0 0 0 1px #fecaca; }
+.avatarOrange { background: #fff7ed; color: #c2410c; box-shadow: inset 0 0 0 1px #fed7aa; }
+.avatarAmber { background: #fffbeb; color: #b45309; box-shadow: inset 0 0 0 1px #fde68a; }
+.avatarEmerald { background: #eff6ff; color: #1d4ed8; box-shadow: inset 0 0 0 1px #bfdbfe; }
+.avatarTeal { background: #f0fdfa; color: #0f766e; box-shadow: inset 0 0 0 1px #99f6e4; }
+.avatarSky { background: #f0f9ff; color: #0369a1; box-shadow: inset 0 0 0 1px #bae6fd; }
+.avatarBlue { background: var(--color-brand-50); color: var(--color-brand-700); box-shadow: inset 0 0 0 1px var(--color-brand-200); }
+.avatarIndigo { background: #eef2ff; color: #4338ca; box-shadow: inset 0 0 0 1px #c7d2fe; }
+.avatarViolet { background: #f5f3ff; color: #6d28d9; box-shadow: inset 0 0 0 1px #ddd6fe; }
+.avatarRose { background: #fff1f2; color: #be123c; box-shadow: inset 0 0 0 1px #fecdd3; }

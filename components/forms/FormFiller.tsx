@@ -120,7 +120,7 @@ export default function FormFiller({ schema, onBack, clientId }: FormFillerProps
         return (
             <div className={styles.container}>
                 <div className={styles.headerCard} style={{ textAlign: 'center', padding: '40px' }}>
-                    <Check size={64} color="#10b981" style={{ margin: '0 auto 20px' }} />
+                    <Check size={64} color="#2563eb" style={{ margin: '0 auto 20px' }} />
                     <h1 className={styles.title}>Submission Sent!</h1>
                     <p className={styles.description}>
                         The form has been sent to {selectedNutritionist?.name || 'the nutritionist'}.

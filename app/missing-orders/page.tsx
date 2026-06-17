@@ -682,7 +682,7 @@ export default function MissingOrdersPage() {
                                       ${Number(displayValue).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </td>
                                     <td style={{ padding: '0.4rem 0.6rem' }}>
-                                      {isMissing ? <span style={{ color: 'var(--color-danger, #dc2626)', fontWeight: 500 }}>Missing</span> : <span style={{ color: 'var(--color-success, #16a34a)' }}>Expected</span>}
+                                      {isMissing ? <span style={{ color: 'var(--color-danger, #dc2626)', fontWeight: 500 }}>Missing</span> : <span style={{ color: 'var(--color-success)' }}>Expected</span>}
                                     </td>
                                     <td style={{ padding: '0.4rem 0.6rem' }}>
                                       {isMissing && missingItem && (
@@ -695,7 +695,7 @@ export default function MissingOrdersPage() {
                                             alignItems: 'center',
                                             gap: '0.25rem',
                                             padding: '0.3rem 0.5rem',
-                                            background: 'var(--color-success, #22c55e)',
+                                            background: 'var(--color-success)',
                                             color: 'white',
                                             border: 'none',
                                             borderRadius: '6px',
@@ -720,7 +720,7 @@ export default function MissingOrdersPage() {
                                     <td style={{ padding: '0.4rem 0.6rem', textAlign: 'right' }}>{row.total_items != null ? row.total_items : '\u2014'}</td>
                                     <td style={{ padding: '0.4rem 0.6rem', textAlign: 'right' }}>{row.total_value != null ? `$${Number(row.total_value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '\u2014'}</td>
                                     <td style={{ padding: '0.4rem 0.6rem' }}>
-                                      {row.status === 'extra' ? <span style={{ color: 'var(--color-warning, #ca8a04)', fontWeight: 500 }}>Extra</span> : <span style={{ color: 'var(--color-success, #16a34a)' }}>Exists</span>}
+                                      {row.status === 'extra' ? <span style={{ color: 'var(--color-warning, #ca8a04)', fontWeight: 500 }}>Extra</span> : <span style={{ color: 'var(--color-success)' }}>Exists</span>}
                                     </td>
                                     <td style={{ padding: '0.4rem 0.6rem' }}>
                                       {row.status === 'extra' && (

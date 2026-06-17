@@ -7,7 +7,7 @@ export default function SmsConversationsHintPage() {
       <h1 style={{ fontSize: '1.25rem', marginBottom: '1rem' }}>SMS bot threads</h1>
       <p style={{ marginBottom: '1rem', color: 'var(--text-secondary, #888)' }}>
         Conversations are <strong>not</strong> shown on this address. Go to{' '}
-        <Link href="/admin" style={{ color: 'var(--color-primary, #22c55e)' }}>
+        <Link href="/admin" style={{ color: 'var(--color-brand-600)' }}>
           Admin
         </Link>
         {' '}→ <strong>SMS Usage</strong> → pick a date range that includes <strong>today</strong> (Eastern) → <strong>Load</strong> →{' '}

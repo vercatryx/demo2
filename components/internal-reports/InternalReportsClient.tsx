@@ -4,8 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent }
 import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { AlertTriangle, Loader2, Mic, Square, Upload } from 'lucide-react';
+import { AlertTriangle, Database, Loader2, Mic, Square, Upload } from 'lucide-react';
 import type { LlmMessage } from '@/lib/ai/llm';
+import { AlertBox, EmptyState, PageHeader, Switch } from '@/components/ui';
+import styles from './InternalReportsClient.module.css';
 
 /** Microsoft Excel mark (Simple Icons, CC0). Green tile reads clearly on brand yellow buttons. */
 function ExcelLogoMark({ size = 22 }: { size?: number }) {
@@ -185,32 +187,16 @@ function toolActivityLabel(name: string): string {
 }
 
 const reportMarkdownComponents: Components = {
-    p: (props) => <p style={{ margin: '0 0 0.65em', lineHeight: 1.55 }} {...props} />,
-    ul: (props) => (
-        <ul style={{ margin: '0 0 0.65em', paddingLeft: '1.25rem', lineHeight: 1.55 }} {...props} />
-    ),
-    ol: (props) => (
-        <ol style={{ margin: '0 0 0.65em', paddingLeft: '1.25rem', lineHeight: 1.55 }} {...props} />
-    ),
-    li: (props) => <li style={{ marginBottom: '0.25em' }} {...props} />,
-    h1: (props) => (
-        <h1 style={{ fontSize: '1.15rem', fontWeight: 800, margin: '0 0 0.5em', lineHeight: 1.35 }} {...props} />
-    ),
-    h2: (props) => (
-        <h2 style={{ fontSize: '1.05rem', fontWeight: 800, margin: '0.85em 0 0.45em', lineHeight: 1.35 }} {...props} />
-    ),
-    h3: (props) => (
-        <h3 style={{ fontSize: '0.98rem', fontWeight: 700, margin: '0.75em 0 0.35em', lineHeight: 1.35 }} {...props} />
-    ),
-    strong: (props) => <strong style={{ fontWeight: 700 }} {...props} />,
+    p: (props) => <p {...props} />,
+    ul: (props) => <ul {...props} />,
+    ol: (props) => <ol {...props} />,
+    li: (props) => <li {...props} />,
+    h1: (props) => <h1 {...props} />,
+    h2: (props) => <h2 {...props} />,
+    h3: (props) => <h3 {...props} />,
+    strong: (props) => <strong {...props} />,
     a: ({ href, children, ...rest }) => (
-        <a
-            href={href}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ color: 'var(--color-accent)', textDecoration: 'underline', textUnderlineOffset: 2 }}
-            {...rest}
-        >
+        <a href={href} target="_blank" rel="noopener noreferrer" {...rest}>
             {children}
         </a>
     ),
@@ -218,87 +204,28 @@ const reportMarkdownComponents: Components = {
         const inline = !className;
         if (inline) {
             return (
-                <code
-                    style={{
-                        fontSize: '0.88em',
-                        background: 'rgba(15, 23, 42, 0.06)',
-                        padding: '0.12em 0.38em',
-                        borderRadius: 5,
-                        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, monospace',
-                    }}
-                    {...rest}
-                >
+                <code {...rest}>
                     {children}
                 </code>
             );
         }
         return (
-            <pre
-                style={{
-                    margin: '0 0 0.65em',
-                    padding: '0.75rem 0.85rem',
-                    borderRadius: 10,
-                    overflow: 'auto',
-                    fontSize: '0.82rem',
-                    lineHeight: 1.45,
-                    background: 'var(--bg-surface)',
-                    border: '1px solid var(--border-color-light)',
-                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, monospace',
-                }}
-            >
+            <pre>
                 <code className={className} {...rest}>
                     {children}
                 </code>
             </pre>
         );
     },
-    blockquote: (props) => (
-        <blockquote
-            style={{
-                margin: '0 0 0.65em',
-                paddingLeft: '0.85rem',
-                borderLeft: '3px solid var(--color-accent)',
-                color: 'var(--text-secondary)',
-            }}
-            {...props}
-        />
-    ),
-    hr: () => <hr style={{ border: 'none', borderTop: '1px solid var(--border-color-light)', margin: '0.85em 0' }} />,
+    blockquote: (props) => <blockquote {...props} />,
+    hr: () => <hr />,
     table: (props) => (
-        <div style={{ overflow: 'auto', margin: '0 0 0.65em' }}>
-            <table
-                style={{
-                    borderCollapse: 'collapse',
-                    fontSize: '0.88rem',
-                    width: '100%',
-                    border: '1px solid var(--border-color-light)',
-                }}
-                {...props}
-            />
+        <div className={styles.mdTableWrap}>
+            <table {...props} />
         </div>
     ),
-    th: (props) => (
-        <th
-            style={{
-                border: '1px solid var(--border-color-light)',
-                padding: '0.4rem 0.55rem',
-                textAlign: 'left',
-                background: 'var(--bg-surface)',
-                fontWeight: 700,
-            }}
-            {...props}
-        />
-    ),
-    td: (props) => (
-        <td
-            style={{
-                border: '1px solid var(--border-color-light)',
-                padding: '0.4rem 0.55rem',
-                verticalAlign: 'top',
-            }}
-            {...props}
-        />
-    ),
+    th: (props) => <th {...props} />,
+    td: (props) => <td {...props} />,
 };
 
 function AssistantBody({
@@ -310,22 +237,13 @@ function AssistantBody({
 }) {
     return (
         <div>
-            <div className="internal-reports-md">
+            <div className={`internal-reports-md ${styles.md}`}>
                 <ReactMarkdown remarkPlugins={[remarkGfm]} components={reportMarkdownComponents}>
                     {text}
                 </ReactMarkdown>
             </div>
             {exportsBelow && exportsBelow.length > 0 ? (
-                <div
-                    style={{
-                        marginTop: '0.75rem',
-                        paddingTop: '0.7rem',
-                        borderTop: '1px solid var(--border-color-light)',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '0.45rem',
-                    }}
-                >
+                <div className={styles.exportBlock}>
                     {exportsBelow.map((ex, i) => (
                         <a
                             key={i}
@@ -333,20 +251,11 @@ function AssistantBody({
                             download={ex.filename}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="btn btn-primary"
-                            style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '0.45rem',
-                                textDecoration: 'none',
-                                fontSize: '0.9rem',
-                                padding: '0.55rem 1rem',
-                                width: 'fit-content',
-                            }}
+                            className={`btn btn-primary ${styles.exportLink}`}
                         >
                             <ExcelLogoMark size={20} />
-                            <span style={{ fontWeight: 700 }}>Download Excel</span>
-                            <span style={{ opacity: 0.88, fontWeight: 600, fontSize: '0.82rem' }}>
+                            <span style={{ fontWeight: 600 }}>Download Excel</span>
+                            <span className={styles.exportMeta}>
                                 ({ex.rowCount.toLocaleString()} rows{ex.truncated ? ', truncated' : ''})
                             </span>
                         </a>
@@ -358,19 +267,7 @@ function AssistantBody({
 }
 
 function LiveActivityStrip({ text }: { text: string }) {
-    return (
-        <span
-            style={{
-                fontSize: '0.8rem',
-                lineHeight: 1.45,
-                color: 'var(--text-tertiary)',
-                display: 'block',
-                maxWidth: '100%',
-            }}
-        >
-            {text}
-        </span>
-    );
+    return <span className={styles.liveActivity}>{text}</span>;
 }
 
 export function InternalReportsClient() {
@@ -1000,785 +897,429 @@ export function InternalReportsClient() {
     const lastUserVisibleIdx = visibleTurns.map((x) => x.m.role).lastIndexOf('user');
 
     return (
-        <div
-            style={{
-                minHeight: '100vh',
-                background: 'var(--bg-app)',
-                color: 'var(--text-primary)',
-                padding: 'clamp(1rem, 3vw, 2rem)',
-            }}
-        >
-            <div style={{ maxWidth: 720, margin: '0 auto' }}>
-                <header style={{ marginBottom: '1.75rem' }}>
-                    <p
-                        style={{
-                            fontSize: '0.7rem',
-                            fontWeight: 700,
-                            letterSpacing: '0.12em',
-                            textTransform: 'uppercase',
-                            color: 'var(--text-tertiary)',
-                            marginBottom: '0.35rem',
-                        }}
-                    >
-                        Internal
-                    </p>
-                    <div
-                        style={{
-                            display: 'flex',
-                            flexWrap: 'wrap',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            gap: '1rem',
-                        }}
-                    >
-                        <h1
-                            style={{
-                                fontSize: 'clamp(1.5rem, 3vw, 2rem)',
-                                fontWeight: 800,
-                                letterSpacing: '-0.02em',
-                                margin: 0,
-                            }}
-                        >
-                            Data copilot
-                        </h1>
-                        <label
-                            style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '0.55rem',
-                                cursor: editingMintBusy ? 'wait' : 'pointer',
-                                userSelect: 'none',
-                            }}
-                        >
-                            <span style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
-                                Enable editing
-                            </span>
-                            <input
-                                type="checkbox"
-                                role="switch"
-                                checked={Boolean(editingSessionToken)}
-                                disabled={editingMintBusy}
-                                onChange={(e) => void onEditingToggle(e.target.checked)}
-                                style={{
-                                    width: 44,
-                                    height: 24,
-                                    cursor: editingMintBusy ? 'wait' : 'pointer',
-                                    accentColor: 'var(--color-accent)',
-                                }}
-                                aria-label="Enable database editing for this session"
-                            />
-                            {editingMintBusy ? <Loader2 size={18} className="animate-spin" aria-hidden /> : null}
-                        </label>
+        <div className={styles.page}>
+            <PageHeader
+                title="Data Copilot"
+                subtitle="Ask questions about your data, export to Excel, or upload spreadsheets for bulk changes."
+                actions={
+                    <div className={styles.headerActions}>
+                        <Switch
+                            checked={Boolean(editingSessionToken)}
+                            disabled={editingMintBusy}
+                            onChange={(checked) => void onEditingToggle(checked)}
+                            label="Enable editing"
+                        />
+                        {editingMintBusy ? <Loader2 size={18} className="animate-spin" aria-hidden /> : null}
                     </div>
-                    <p style={{ margin: '0.5rem 0 0', fontSize: '0.78rem', color: 'var(--text-tertiary)', lineHeight: 1.45 }}>
-                        Turn on to allow packaged bulk writes (review Excel + confirmation). Reads and exports work either way.
-                    </p>
-                    {editingMintError ? (
-                        <p style={{ margin: '0.65rem 0 0', fontSize: '0.82rem', color: 'var(--color-danger)' }}>{editingMintError}</p>
+                }
+            />
+            <p className={styles.editingHint}>
+                Turn on editing to allow packaged bulk writes (review workbook + confirmation). Reads and exports work either way.
+            </p>
+            {editingMintError ? (
+                <AlertBox tone="error">{editingMintError}</AlertBox>
+            ) : null}
+
+            <div className={`card ${styles.chatCard}`}>
+                <div ref={scrollRef} className={styles.chatScroll}>
+                    {visibleTurns.length === 0 && !streamingText && !chatBusy ? (
+                        <EmptyState
+                            icon={<Database size={22} strokeWidth={1.6} />}
+                            title="What would you like to know?"
+                            body={
+                                <>
+                                    Ask anything about your data, or upload an Excel file below. The copilot inspects column
+                                    structure — not every row — and stays in chat until you ask to apply changes.
+                                </>
+                            }
+                        />
                     ) : null}
-                </header>
 
-                <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-                    <div
-                        ref={scrollRef}
-                        style={{
-                            minHeight: 320,
-                            maxHeight: 'min(70vh, 720px)',
-                            overflowY: 'auto',
-                            padding: '1.25rem',
-                        }}
-                    >
-                        {visibleTurns.length === 0 && !streamingText && !chatBusy ? (
-                            <p style={{ color: 'var(--text-tertiary)', fontSize: '0.95rem' }}>
-                                Ask anything about your data, or **Upload Excel** below — the copilot inspects column structure (not
-                                every row) and stays in the chat until you ask to apply changes. Turn **Enable editing** on before
-                                bulk imports.
-                            </p>
-                        ) : null}
-
-                        {visibleTurns.map(({ m, idx }, i) => {
-                            const ex = exportByMessageIndex[idx];
-                            return (
-                                <div key={`${idx}-${i}`} style={{ marginBottom: '0.25rem' }}>
+                    {visibleTurns.map(({ m, idx }, i) => {
+                        const ex = exportByMessageIndex[idx];
+                        const isUser = m.role === 'user';
+                        return (
+                            <div key={`${idx}-${i}`} className={styles.messageBlock}>
+                                <div
+                                    className={`${styles.messageRow} ${isUser ? styles.messageRowUser : styles.messageRowAssistant}`}
+                                >
                                     <div
-                                        style={{
-                                            display: 'flex',
-                                            justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start',
-                                        }}
+                                        className={`${styles.messageBubble} ${isUser ? styles.messageUser : styles.messageAssistant}`}
                                     >
-                                        <div
-                                            style={{
-                                                maxWidth: '94%',
-                                                padding: '0.85rem 1.1rem',
-                                                borderRadius: 14,
-                                                lineHeight: 1.5,
-                                                fontSize: '0.95rem',
-                                                background:
-                                                    m.role === 'user'
-                                                        ? 'linear-gradient(135deg, var(--color-primary) 0%, #eab308 100%)'
-                                                        : 'var(--bg-surface-hover)',
-                                                color: m.role === 'user' ? '#0f172a' : 'var(--text-primary)',
-                                                border:
-                                                    m.role === 'user'
-                                                        ? '1px solid rgba(15,23,42,0.08)'
-                                                        : '1px solid var(--border-color-light)',
-                                                boxShadow: m.role === 'user' ? '0 2px 8px rgba(15,23,42,0.06)' : 'none',
-                                            }}
-                                        >
-                                            {m.role === 'assistant' ? (
-                                                <AssistantBody text={(m as { content?: string }).content ?? ''} exportsBelow={ex} />
+                                        {m.role === 'assistant' ? (
+                                            <AssistantBody text={(m as { content?: string }).content ?? ''} exportsBelow={ex} />
+                                        ) : (
+                                            <div className={styles.messageUserText}>{(m as { content: string }).content}</div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {isUser && i === lastUserVisibleIdx && chatBusy ? (
+                                    <>
+                                        <div className={styles.liveActivity}>
+                                            {liveActivity ? (
+                                                <LiveActivityStrip text={liveActivity} />
                                             ) : (
-                                                <div style={{ whiteSpace: 'pre-wrap' }}>{(m as { content: string }).content}</div>
+                                                <span>Connecting…</span>
                                             )}
                                         </div>
-                                    </div>
-
-                                    {m.role === 'user' && i === lastUserVisibleIdx && chatBusy ? (
-                                        <>
-                                            {liveActivity ? (
-                                                <div style={{ marginTop: '0.35rem' }}>
-                                                    <LiveActivityStrip text={liveActivity} />
+                                        {streamingText ? (
+                                            <div className={`${styles.messageRow} ${styles.messageRowAssistant}`}>
+                                                <div className={`${styles.messageBubble} ${styles.messageStreaming}`}>
+                                                    <AssistantBody text={streamingText} />
+                                                    <span className={styles.cursor}>▍</span>
                                                 </div>
-                                            ) : (
-                                                <div style={{ marginTop: '0.35rem' }}>
-                                                    <span style={{ fontSize: '0.8rem', color: 'var(--text-tertiary)' }}>
-                                                        Connecting…
-                                                    </span>
-                                                </div>
-                                            )}
-                                            {streamingText ? (
-                                                <div style={{ display: 'flex', justifyContent: 'flex-start', marginTop: '0.35rem' }}>
-                                                    <div
-                                                        style={{
-                                                            maxWidth: '94%',
-                                                            padding: '0.85rem 1.1rem',
-                                                            borderRadius: 14,
-                                                            lineHeight: 1.5,
-                                                            fontSize: '0.95rem',
-                                                            background: 'var(--bg-surface-hover)',
-                                                            border: '1px dashed var(--border-color)',
-                                                            color: 'var(--text-primary)',
-                                                        }}
-                                                    >
-                                                        <AssistantBody text={streamingText} />
-                                                        <span style={{ opacity: 0.45, marginLeft: 2 }}>▍</span>
-                                                    </div>
-                                                </div>
-                                            ) : null}
-                                        </>
-                                    ) : null}
-                                </div>
-                            );
-                        })}
-                    </div>
+                                            </div>
+                                        ) : null}
+                                    </>
+                                ) : null}
+                            </div>
+                        );
+                    })}
+                </div>
 
-                    {pendingWrites ? (
-                        <div
-                            style={{
-                                padding: '1rem 1.25rem',
-                                borderTop: '1px solid var(--border-color-light)',
-                                background: 'rgba(234, 179, 8, 0.09)',
-                            }}
+                {pendingWrites ? (
+                    <div className={`${styles.pendingPanel} ${styles.pendingPanelWrites}`}>
+                        <div className={styles.pendingLabel}>Pending database changes</div>
+                        <p className={styles.pendingTitle}>{pendingWrites.summary}</p>
+                        <p className={styles.pendingBody}>
+                            {pendingWrites.totalImpactRows.toLocaleString()} row(s) across{' '}
+                            {pendingWrites.operationCount} step(s). Download the workbook for the full audit trail
+                            (one sheet per step). Nothing has been written yet.
+                        </p>
+                        <ul className={styles.pendingList}>
+                            {pendingWrites.operations.map((op, i) => (
+                                <li key={i}>
+                                    <strong>{op.title}</strong> — {op.impactRowCount.toLocaleString()} row(s)
+                                </li>
+                            ))}
+                        </ul>
+                        <a
+                            href={toAbsoluteDownloadUrl(pendingWrites.downloadUrl)}
+                            download={pendingWrites.filename}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={`btn btn-secondary ${styles.downloadLink}`}
                         >
-                            <div
-                                style={{
-                                    fontSize: '0.62rem',
-                                    fontWeight: 800,
-                                    letterSpacing: '0.06em',
-                                    textTransform: 'uppercase',
-                                    color: 'var(--text-tertiary)',
-                                    marginBottom: '0.35rem',
-                                }}
-                            >
-                                Pending database changes
-                            </div>
-                            <p style={{ margin: '0 0 0.5rem', fontSize: '0.95rem', fontWeight: 700, lineHeight: 1.45 }}>
-                                {pendingWrites.summary}
-                            </p>
-                            <p style={{ margin: '0 0 0.75rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                                {pendingWrites.totalImpactRows.toLocaleString()} row(s) across{' '}
-                                {pendingWrites.operationCount} step(s). Download the workbook for the full audit trail
-                                (one sheet per step). Nothing has been written yet.
-                            </p>
-                            <ul
-                                style={{
-                                    margin: '0 0 0.85rem',
-                                    paddingLeft: '1.1rem',
-                                    fontSize: '0.85rem',
-                                    color: 'var(--text-secondary)',
-                                    lineHeight: 1.5,
-                                }}
-                            >
-                                {pendingWrites.operations.map((op, i) => (
-                                    <li key={i}>
-                                        <strong style={{ color: 'var(--text-primary)' }}>{op.title}</strong> —{' '}
-                                        {op.impactRowCount.toLocaleString()} row(s)
-                                    </li>
-                                ))}
-                            </ul>
-                            <a
-                                href={toAbsoluteDownloadUrl(pendingWrites.downloadUrl)}
-                                download={pendingWrites.filename}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="btn btn-secondary"
-                                style={{
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '0.45rem',
-                                    textDecoration: 'none',
-                                    fontSize: '0.88rem',
-                                    padding: '0.5rem 0.95rem',
-                                    marginBottom: '0.75rem',
-                                }}
-                            >
-                                <ExcelLogoMark size={18} />
-                                <span style={{ fontWeight: 700 }}>Download review workbook</span>
-                            </a>
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                                <button
-                                    type="button"
-                                    className="btn btn-secondary"
-                                    style={{ fontSize: '0.85rem' }}
-                                    onClick={dismissPendingWrites}
-                                >
-                                    Dismiss
-                                </button>
-                                <button
-                                    type="button"
-                                    className="btn btn-primary"
-                                    style={{ fontSize: '0.85rem' }}
-                                    disabled={!editingSessionToken}
-                                    title={
-                                        editingSessionToken
-                                            ? undefined
-                                            : 'Turn on Enable editing to apply changes to the database.'
-                                    }
-                                    onClick={() => {
-                                        setCommitModalOpen(true);
-                                        setCommitAckDanger(false);
-                                        setCommitPhrase('');
-                                        setCommitModalError('');
-                                    }}
-                                >
-                                    Review and apply…
-                                </button>
-                            </div>
-                        </div>
-                    ) : null}
-
-                    {pendingMessages ? (
-                        <div
-                            style={{
-                                padding: '1rem 1.25rem',
-                                borderTop: '1px solid var(--border-color-light)',
-                                background: 'rgba(59, 130, 246, 0.08)',
-                            }}
-                        >
-                            <div
-                                style={{
-                                    fontSize: '0.62rem',
-                                    fontWeight: 800,
-                                    letterSpacing: '0.06em',
-                                    textTransform: 'uppercase',
-                                    color: 'var(--text-tertiary)',
-                                    marginBottom: '0.35rem',
-                                }}
-                            >
-                                Pending {channelLabel(pendingMessages.channel).toLowerCase()} messages
-                            </div>
-                            <p style={{ margin: '0 0 0.5rem', fontSize: '0.95rem', fontWeight: 700, lineHeight: 1.45 }}>
-                                {pendingMessages.summary}
-                            </p>
-                            <p style={{ margin: '0 0 0.75rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                                {pendingMessages.willSendCount.toLocaleString()} will send ·{' '}
-                                {pendingMessages.skippedCount.toLocaleString()} skipped ·{' '}
-                                {pendingMessages.recipientCount.toLocaleString()} total in preview. Download the workbook
-                                to review each person&apos;s message. Nothing has been sent yet.
-                            </p>
-                            <a
-                                href={toAbsoluteDownloadUrl(pendingMessages.downloadUrl)}
-                                download={pendingMessages.filename}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="btn btn-secondary"
-                                style={{
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '0.45rem',
-                                    textDecoration: 'none',
-                                    fontSize: '0.88rem',
-                                    padding: '0.5rem 0.95rem',
-                                    marginBottom: '0.75rem',
-                                }}
-                            >
-                                <ExcelLogoMark size={18} />
-                                <span style={{ fontWeight: 700 }}>Download message preview</span>
-                            </a>
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                                <button
-                                    type="button"
-                                    className="btn btn-secondary"
-                                    style={{ fontSize: '0.85rem' }}
-                                    onClick={dismissPendingMessages}
-                                >
-                                    Dismiss
-                                </button>
-                                <button
-                                    type="button"
-                                    className="btn btn-primary"
-                                    style={{ fontSize: '0.85rem' }}
-                                    onClick={() => {
-                                        setMessagesModalOpen(true);
-                                        setMessagesCommitAck(false);
-                                        setMessagesCommitPhrase('');
-                                        setMessagesCommitError('');
-                                    }}
-                                >
-                                    Review and send…
-                                </button>
-                            </div>
-                        </div>
-                    ) : null}
-
-                    <div style={{ padding: '1rem 1.25rem', borderTop: '1px solid var(--border-color-light)' }}>
-                        <input
-                            ref={spreadsheetInputRef}
-                            type="file"
-                            accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
-                            style={{ display: 'none' }}
-                            onChange={(e) => {
-                                const f = e.target.files?.[0];
-                                if (f) void onSpreadsheetFile(f);
-                            }}
-                        />
-                        <div
-                            style={{
-                                display: 'flex',
-                                flexWrap: 'wrap',
-                                gap: '0.5rem',
-                                marginBottom: '0.75rem',
-                                alignItems: 'center',
-                            }}
-                        >
-                            <button
-                                type="button"
-                                className="btn btn-secondary"
-                                disabled={chatBusy || spreadsheetBusy}
-                                onClick={() => spreadsheetInputRef.current?.click()}
-                                style={{
-                                    fontSize: '0.85rem',
-                                    padding: '0.5rem 0.85rem',
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '0.4rem',
-                                }}
-                            >
-                                {spreadsheetBusy ? (
-                                    <Loader2 size={16} className="animate-spin" aria-hidden />
-                                ) : (
-                                    <Upload size={16} aria-hidden />
-                                )}
-                                Upload Excel
-                            </button>
-                            <span style={{ fontSize: '0.82rem', color: 'var(--text-tertiary)', lineHeight: 1.45 }}>
-                                Inspects columns and shape — keeps chatting without dumping every row.
-                            </span>
-                        </div>
-                        {attachedSpreadsheet ? (
-                            <div
-                                style={{
-                                    display: 'flex',
-                                    flexWrap: 'wrap',
-                                    gap: '0.5rem',
-                                    alignItems: 'center',
-                                    marginBottom: '0.75rem',
-                                    padding: '0.5rem 0.75rem',
-                                    borderRadius: 8,
-                                    background: 'rgba(234, 179, 8, 0.08)',
-                                    border: '1px solid rgba(234, 179, 8, 0.35)',
-                                    fontSize: '0.82rem',
-                                    color: 'var(--text-secondary)',
-                                }}
-                            >
-                                <span>
-                                    Attached: <strong>{attachedSpreadsheet.upload.filename}</strong> (
-                                    {attachedSpreadsheet.structure.rowCount} rows,{' '}
-                                    {attachedSpreadsheet.structure.detectedProfiles[0] ?? 'tabular'})
-                                </span>
-                                <button
-                                    type="button"
-                                    className="btn btn-secondary"
-                                    style={{ fontSize: '0.78rem', padding: '0.3rem 0.55rem', marginLeft: 'auto' }}
-                                    disabled={chatBusy || spreadsheetBusy}
-                                    onClick={() => setAttachedSpreadsheet(null)}
-                                >
-                                    Remove
-                                </button>
-                            </div>
-                        ) : null}
-                        <div style={{ position: 'relative' }}>
-                            <textarea
-                                value={chatInput}
-                                onChange={(e) => setChatInput(e.target.value)}
-                                onKeyDown={onComposerKeyDown}
-                                rows={3}
-                                disabled={chatBusy || voicePhase === 'transcribing'}
-                                placeholder="Ask me anything about your data"
-                                style={{
-                                    width: '100%',
-                                    padding: '0.85rem 1rem',
-                                    paddingRight: '3.25rem',
-                                    fontSize: '0.95rem',
-                                    borderRadius: 10,
-                                    border: '1px solid var(--border-color)',
-                                    background: 'var(--bg-surface)',
-                                    color: 'var(--text-primary)',
-                                    resize: 'vertical',
-                                    fontFamily: 'inherit',
-                                }}
-                            />
-                            <button
-                                type="button"
-                                className="btn btn-secondary"
-                                disabled={chatBusy}
-                                onClick={() => void onVoiceButton()}
-                                aria-label={
-                                    voicePhase === 'recording'
-                                        ? 'Stop recording and transcribe'
-                                        : voicePhase === 'transcribing'
-                                          ? 'Transcribing…'
-                                          : 'Record voice'
-                                }
-                                title={
-                                    voicePhase === 'recording'
-                                        ? 'Stop and transcribe into the box (then press Send)'
-                                        : voicePhase === 'transcribing'
-                                          ? 'Transcribing…'
-                                          : 'Speak your question (tap again to stop and transcribe)'
-                                }
-                                style={{
-                                    position: 'absolute',
-                                    right: '0.55rem',
-                                    bottom: '0.55rem',
-                                    width: 40,
-                                    height: 40,
-                                    padding: 0,
-                                    borderRadius: 9999,
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    boxShadow: 'var(--shadow-sm)',
-                                }}
-                            >
-                                {voicePhase === 'transcribing' ? (
-                                    <Loader2 size={20} className="animate-spin" aria-hidden />
-                                ) : voicePhase === 'recording' ? (
-                                    <Square size={16} fill="currentColor" aria-hidden />
-                                ) : (
-                                    <Mic size={20} strokeWidth={2} aria-hidden />
-                                )}
-                            </button>
-                        </div>
-                        <div
-                            style={{
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                alignItems: 'center',
-                                flexWrap: 'wrap',
-                                gap: '0.5rem',
-                                marginTop: '0.65rem',
-                            }}
-                        >
-                            <button
-                                type="button"
-                                className="btn btn-secondary"
-                                onClick={newConversation}
-                                style={{ fontSize: '0.85rem', padding: '0.55rem 1rem' }}
-                            >
-                                New conversation
+                            <ExcelLogoMark size={18} />
+                            <span style={{ fontWeight: 600 }}>Download review workbook</span>
+                        </a>
+                        <div className={styles.pendingActions}>
+                            <button type="button" className="btn btn-secondary" onClick={dismissPendingWrites}>
+                                Dismiss
                             </button>
                             <button
                                 type="button"
                                 className="btn btn-primary"
-                                disabled={chatBusy || spreadsheetBusy || voicePhase !== 'idle'}
-                                onClick={sendChat}
+                                disabled={!editingSessionToken}
+                                title={
+                                    editingSessionToken
+                                        ? undefined
+                                        : 'Turn on Enable editing to apply changes to the database.'
+                                }
+                                onClick={() => {
+                                    setCommitModalOpen(true);
+                                    setCommitAckDanger(false);
+                                    setCommitPhrase('');
+                                    setCommitModalError('');
+                                }}
                             >
-                                {chatBusy || spreadsheetBusy ? 'Working…' : 'Send'}
+                                Review and apply…
+                            </button>
+                        </div>
+                    </div>
+                ) : null}
+
+                {pendingMessages ? (
+                    <div className={`${styles.pendingPanel} ${styles.pendingPanelMessages}`}>
+                        <div className={styles.pendingLabel}>
+                            Pending {channelLabel(pendingMessages.channel).toLowerCase()} messages
+                        </div>
+                        <p className={styles.pendingTitle}>{pendingMessages.summary}</p>
+                        <p className={styles.pendingBody}>
+                            {pendingMessages.willSendCount.toLocaleString()} will send ·{' '}
+                            {pendingMessages.skippedCount.toLocaleString()} skipped ·{' '}
+                            {pendingMessages.recipientCount.toLocaleString()} total in preview. Download the workbook
+                            to review each person&apos;s message. Nothing has been sent yet.
+                        </p>
+                        <a
+                            href={toAbsoluteDownloadUrl(pendingMessages.downloadUrl)}
+                            download={pendingMessages.filename}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={`btn btn-secondary ${styles.downloadLink}`}
+                        >
+                            <ExcelLogoMark size={18} />
+                            <span style={{ fontWeight: 600 }}>Download message preview</span>
+                        </a>
+                        <div className={styles.pendingActions}>
+                            <button type="button" className="btn btn-secondary" onClick={dismissPendingMessages}>
+                                Dismiss
+                            </button>
+                            <button
+                                type="button"
+                                className="btn btn-primary"
+                                onClick={() => {
+                                    setMessagesModalOpen(true);
+                                    setMessagesCommitAck(false);
+                                    setMessagesCommitPhrase('');
+                                    setMessagesCommitError('');
+                                }}
+                            >
+                                Review and send…
+                            </button>
+                        </div>
+                    </div>
+                ) : null}
+
+                <div className={styles.composer}>
+                    <input
+                        ref={spreadsheetInputRef}
+                        type="file"
+                        accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+                        hidden
+                        onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) void onSpreadsheetFile(f);
+                        }}
+                    />
+                    <div className={styles.uploadRow}>
+                        <button
+                            type="button"
+                            className="btn btn-secondary"
+                            disabled={chatBusy || spreadsheetBusy}
+                            onClick={() => spreadsheetInputRef.current?.click()}
+                        >
+                            {spreadsheetBusy ? (
+                                <Loader2 size={16} className="animate-spin" aria-hidden />
+                            ) : (
+                                <Upload size={16} aria-hidden />
+                            )}
+                            Upload Excel
+                        </button>
+                        <span className={styles.uploadHint}>
+                            Inspects columns and shape — keeps chatting without dumping every row.
+                        </span>
+                    </div>
+                    {attachedSpreadsheet ? (
+                        <div className={styles.attachmentBar}>
+                            <span>
+                                Attached: <strong>{attachedSpreadsheet.upload.filename}</strong> (
+                                {attachedSpreadsheet.structure.rowCount} rows,{' '}
+                                {attachedSpreadsheet.structure.detectedProfiles[0] ?? 'tabular'})
+                            </span>
+                            <button
+                                type="button"
+                                className={`btn btn-secondary ${styles.attachmentRemove}`}
+                                disabled={chatBusy || spreadsheetBusy}
+                                onClick={() => setAttachedSpreadsheet(null)}
+                            >
+                                Remove
+                            </button>
+                        </div>
+                    ) : null}
+                    <div className={styles.composerInputWrap}>
+                        <textarea
+                            value={chatInput}
+                            onChange={(e) => setChatInput(e.target.value)}
+                            onKeyDown={onComposerKeyDown}
+                            rows={3}
+                            disabled={chatBusy || voicePhase === 'transcribing'}
+                            placeholder="Ask me anything about your data"
+                            className={styles.composerInput}
+                        />
+                        <button
+                            type="button"
+                            className={`btn btn-secondary ${styles.voiceBtn}`}
+                            disabled={chatBusy}
+                            onClick={() => void onVoiceButton()}
+                            aria-label={
+                                voicePhase === 'recording'
+                                    ? 'Stop recording and transcribe'
+                                    : voicePhase === 'transcribing'
+                                      ? 'Transcribing…'
+                                      : 'Record voice'
+                            }
+                            title={
+                                voicePhase === 'recording'
+                                    ? 'Stop and transcribe into the box (then press Send)'
+                                    : voicePhase === 'transcribing'
+                                      ? 'Transcribing…'
+                                      : 'Speak your question (tap again to stop and transcribe)'
+                            }
+                        >
+                            {voicePhase === 'transcribing' ? (
+                                <Loader2 size={18} className="animate-spin" aria-hidden />
+                            ) : voicePhase === 'recording' ? (
+                                <Square size={14} fill="currentColor" aria-hidden />
+                            ) : (
+                                <Mic size={18} strokeWidth={2} aria-hidden />
+                            )}
+                        </button>
+                    </div>
+                    <div className={styles.composerFooter}>
+                        <button type="button" className="btn btn-ghost" onClick={newConversation}>
+                            New conversation
+                        </button>
+                        <button
+                            type="button"
+                            className="btn btn-primary"
+                            disabled={chatBusy || spreadsheetBusy || voicePhase !== 'idle'}
+                            onClick={sendChat}
+                        >
+                            {chatBusy || spreadsheetBusy ? 'Working…' : 'Send'}
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div className={styles.bannerStack}>
+                {successBanner ? <AlertBox tone="success">{successBanner}</AlertBox> : null}
+                {error ? <AlertBox tone="error">{error}</AlertBox> : null}
+            </div>
+
+            {commitModalOpen && pendingWrites ? (
+                <div
+                    className={styles.modalOverlay}
+                    role="presentation"
+                    onClick={(e) => {
+                        if (e.target === e.currentTarget && !commitBusy) setCommitModalOpen(false);
+                    }}
+                >
+                    <div
+                        className={styles.modalPanel}
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="commit-writes-title"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className={styles.modalHeader}>
+                            <AlertTriangle size={22} className={styles.modalIconDanger} aria-hidden />
+                            <div>
+                                <h2 id="commit-writes-title" className={styles.modalTitle}>
+                                    Confirm destructive changes
+                                </h2>
+                                <p className={styles.modalSubtitle}>
+                                    Applying runs all steps <strong>in one transaction</strong> on the live database.
+                                    Updates may overwrite data; deletes cannot be undone from here.
+                                </p>
+                            </div>
+                        </div>
+                        <p className={styles.modalSummary}>
+                            <strong>Summary:</strong> {pendingWrites.summary}
+                        </p>
+                        <label className={styles.modalCheckLabel}>
+                            <input
+                                type="checkbox"
+                                checked={commitAckDanger}
+                                onChange={(e) => setCommitAckDanger(e.target.checked)}
+                            />
+                            <span>I understand these actions may be destructive or irreversible.</span>
+                        </label>
+                        <label className={styles.modalFieldLabel}>Type APPLY to confirm</label>
+                        <input
+                            type="text"
+                            autoComplete="off"
+                            value={commitPhrase}
+                            onChange={(e) => setCommitPhrase(e.target.value)}
+                            placeholder="APPLY"
+                            disabled={commitBusy}
+                            className={styles.modalInput}
+                        />
+                        {commitModalError ? <p className={styles.modalError}>{commitModalError}</p> : null}
+                        <div className={styles.modalActions}>
+                            <button
+                                type="button"
+                                className="btn btn-secondary"
+                                disabled={commitBusy}
+                                onClick={() => !commitBusy && setCommitModalOpen(false)}
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                className="btn btn-danger"
+                                disabled={commitBusy}
+                                onClick={() => void submitCommitWrites()}
+                            >
+                                {commitBusy ? 'Applying…' : 'Apply changes'}
                             </button>
                         </div>
                     </div>
                 </div>
+            ) : null}
 
-                {successBanner ? (
+            {messagesModalOpen && pendingMessages ? (
+                <div
+                    className={styles.modalOverlay}
+                    role="presentation"
+                    onClick={(e) => {
+                        if (e.target === e.currentTarget && !messagesCommitBusy) setMessagesModalOpen(false);
+                    }}
+                >
                     <div
-                        className="card"
-                        style={{
-                            marginTop: '1rem',
-                            background: 'rgba(34, 197, 94, 0.08)',
-                            borderColor: 'rgba(34, 197, 94, 0.35)',
-                            color: 'var(--text-primary)',
-                            fontSize: '0.92rem',
-                            padding: '0.85rem 1rem',
-                            lineHeight: 1.5,
-                        }}
+                        className={styles.modalPanel}
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="commit-messages-title"
+                        onClick={(e) => e.stopPropagation()}
                     >
-                        {successBanner}
-                    </div>
-                ) : null}
-
-                {error ? (
-                    <pre
-                        className="card"
-                        style={{
-                            marginTop: '1rem',
-                            background: 'rgba(239,68,68,0.08)',
-                            borderColor: 'rgba(239,68,68,0.35)',
-                            color: 'var(--color-danger)',
-                            fontSize: '0.85rem',
-                            whiteSpace: 'pre-wrap',
-                        }}
-                    >
-                        {error}
-                    </pre>
-                ) : null}
-
-                {commitModalOpen && pendingWrites ? (
-                    <div
-                        style={{
-                            position: 'fixed',
-                            inset: 0,
-                            zIndex: 50,
-                            background: 'rgba(15, 23, 42, 0.5)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            padding: '1rem',
-                        }}
-                        role="presentation"
-                        onClick={(e) => {
-                            if (e.target === e.currentTarget && !commitBusy) setCommitModalOpen(false);
-                        }}
-                    >
-                        <div
-                            className="card"
-                            role="dialog"
-                            aria-modal="true"
-                            aria-labelledby="commit-writes-title"
-                            style={{ maxWidth: 480, width: '100%', padding: '1.25rem' }}
-                            onClick={(e) => e.stopPropagation()}
-                        >
-                            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem', marginBottom: '0.75rem' }}>
-                                <AlertTriangle
-                                    size={22}
-                                    style={{ flexShrink: 0, color: 'var(--color-danger)', marginTop: 2 }}
-                                    aria-hidden
-                                />
-                                <div>
-                                    <h2 id="commit-writes-title" style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800 }}>
-                                        Confirm destructive changes
-                                    </h2>
-                                    <p style={{ margin: '0.35rem 0 0', fontSize: '0.88rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                                        Applying runs all steps <strong>in one transaction</strong> on the live database. Updates may
-                                        overwrite data; deletes cannot be undone from here.
-                                    </p>
-                                </div>
-                            </div>
-                            <p
-                                style={{
-                                    margin: '0 0 0.75rem',
-                                    fontSize: '0.82rem',
-                                    padding: '0.55rem 0.65rem',
-                                    borderRadius: 8,
-                                    background: 'var(--bg-surface)',
-                                    border: '1px solid var(--border-color-light)',
-                                    lineHeight: 1.45,
-                                }}
-                            >
-                                <strong>Summary:</strong> {pendingWrites.summary}
-                            </p>
-                            <label
-                                style={{
-                                    display: 'flex',
-                                    alignItems: 'flex-start',
-                                    gap: '0.5rem',
-                                    fontSize: '0.86rem',
-                                    cursor: 'pointer',
-                                    marginBottom: '0.75rem',
-                                    lineHeight: 1.45,
-                                }}
-                            >
-                                <input
-                                    type="checkbox"
-                                    checked={commitAckDanger}
-                                    onChange={(e) => setCommitAckDanger(e.target.checked)}
-                                    style={{ marginTop: 3 }}
-                                />
-                                <span>I understand these actions may be destructive or irreversible.</span>
-                            </label>
-                            <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-tertiary)', marginBottom: '0.25rem' }}>
-                                Type APPLY to confirm
-                            </label>
-                            <input
-                                type="text"
-                                autoComplete="off"
-                                value={commitPhrase}
-                                onChange={(e) => setCommitPhrase(e.target.value)}
-                                placeholder="APPLY"
-                                disabled={commitBusy}
-                                style={{
-                                    width: '100%',
-                                    padding: '0.55rem 0.65rem',
-                                    fontSize: '0.9rem',
-                                    borderRadius: 8,
-                                    border: '1px solid var(--border-color)',
-                                    background: 'var(--bg-surface)',
-                                    color: 'var(--text-primary)',
-                                    marginBottom: '0.65rem',
-                                }}
-                            />
-                            {commitModalError ? (
-                                <p style={{ margin: '0 0 0.65rem', fontSize: '0.82rem', color: 'var(--color-danger)' }}>{commitModalError}</p>
-                            ) : null}
-                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', flexWrap: 'wrap' }}>
-                                <button
-                                    type="button"
-                                    className="btn btn-secondary"
-                                    disabled={commitBusy}
-                                    onClick={() => !commitBusy && setCommitModalOpen(false)}
-                                >
-                                    Cancel
-                                </button>
-                                <button type="button" className="btn btn-danger" disabled={commitBusy} onClick={() => void submitCommitWrites()}>
-                                    {commitBusy ? 'Applying…' : 'Apply changes'}
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                ) : null}
-
-                {messagesModalOpen && pendingMessages ? (
-                    <div
-                        style={{
-                            position: 'fixed',
-                            inset: 0,
-                            zIndex: 50,
-                            background: 'rgba(15, 23, 42, 0.5)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            padding: '1rem',
-                        }}
-                        role="presentation"
-                        onClick={(e) => {
-                            if (e.target === e.currentTarget && !messagesCommitBusy) setMessagesModalOpen(false);
-                        }}
-                    >
-                        <div
-                            className="card"
-                            role="dialog"
-                            aria-modal="true"
-                            aria-labelledby="commit-messages-title"
-                            style={{ maxWidth: 480, width: '100%', padding: '1.25rem' }}
-                            onClick={(e) => e.stopPropagation()}
-                        >
-                            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem', marginBottom: '0.75rem' }}>
-                                <AlertTriangle
-                                    size={22}
-                                    style={{ flexShrink: 0, color: 'var(--color-primary)', marginTop: 2 }}
-                                    aria-hidden
-                                />
-                                <div>
-                                    <h2 id="commit-messages-title" style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800 }}>
-                                        Confirm send
-                                    </h2>
-                                    <p style={{ margin: '0.35rem 0 0', fontSize: '0.88rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                                        This will send {channelLabel(pendingMessages.channel).toLowerCase()} messages to{' '}
-                                        <strong>{pendingMessages.willSendCount.toLocaleString()}</strong> recipient(s). Review
-                                        the Excel preview first.
-                                    </p>
-                                </div>
-                            </div>
-                            <p
-                                style={{
-                                    margin: '0 0 0.75rem',
-                                    fontSize: '0.82rem',
-                                    padding: '0.55rem 0.65rem',
-                                    borderRadius: 8,
-                                    background: 'var(--bg-surface)',
-                                    border: '1px solid var(--border-color-light)',
-                                    lineHeight: 1.45,
-                                }}
-                            >
-                                <strong>Summary:</strong> {pendingMessages.summary}
-                            </p>
-                            <label
-                                style={{
-                                    display: 'flex',
-                                    alignItems: 'flex-start',
-                                    gap: '0.5rem',
-                                    fontSize: '0.86rem',
-                                    cursor: 'pointer',
-                                    marginBottom: '0.75rem',
-                                    lineHeight: 1.45,
-                                }}
-                            >
-                                <input
-                                    type="checkbox"
-                                    checked={messagesCommitAck}
-                                    onChange={(e) => setMessagesCommitAck(e.target.checked)}
-                                    style={{ marginTop: 3 }}
-                                />
-                                <span>I reviewed the message preview and each recipient looks correct.</span>
-                            </label>
-                            <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-tertiary)', marginBottom: '0.25rem' }}>
-                                Type SEND to confirm
-                            </label>
-                            <input
-                                type="text"
-                                autoComplete="off"
-                                value={messagesCommitPhrase}
-                                onChange={(e) => setMessagesCommitPhrase(e.target.value)}
-                                placeholder="SEND"
-                                disabled={messagesCommitBusy}
-                                style={{
-                                    width: '100%',
-                                    padding: '0.55rem 0.65rem',
-                                    fontSize: '0.9rem',
-                                    borderRadius: 8,
-                                    border: '1px solid var(--border-color)',
-                                    background: 'var(--bg-surface)',
-                                    color: 'var(--text-primary)',
-                                    marginBottom: '0.65rem',
-                                }}
-                            />
-                            {messagesCommitError ? (
-                                <p style={{ margin: '0 0 0.65rem', fontSize: '0.82rem', color: 'var(--color-danger)' }}>
-                                    {messagesCommitError}
+                        <div className={styles.modalHeader}>
+                            <AlertTriangle size={22} className={styles.modalIconInfo} aria-hidden />
+                            <div>
+                                <h2 id="commit-messages-title" className={styles.modalTitle}>
+                                    Confirm send
+                                </h2>
+                                <p className={styles.modalSubtitle}>
+                                    This will send {channelLabel(pendingMessages.channel).toLowerCase()} messages to{' '}
+                                    <strong>{pendingMessages.willSendCount.toLocaleString()}</strong> recipient(s).
+                                    Review the Excel preview first.
                                 </p>
-                            ) : null}
-                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', flexWrap: 'wrap' }}>
-                                <button
-                                    type="button"
-                                    className="btn btn-secondary"
-                                    disabled={messagesCommitBusy}
-                                    onClick={() => !messagesCommitBusy && setMessagesModalOpen(false)}
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    type="button"
-                                    className="btn btn-primary"
-                                    disabled={messagesCommitBusy}
-                                    onClick={() => void submitCommitMessages()}
-                                >
-                                    {messagesCommitBusy ? 'Sending…' : `Send ${pendingMessages.willSendCount} messages`}
-                                </button>
                             </div>
                         </div>
+                        <p className={styles.modalSummary}>
+                            <strong>Summary:</strong> {pendingMessages.summary}
+                        </p>
+                        <label className={styles.modalCheckLabel}>
+                            <input
+                                type="checkbox"
+                                checked={messagesCommitAck}
+                                onChange={(e) => setMessagesCommitAck(e.target.checked)}
+                            />
+                            <span>I reviewed the message preview and each recipient looks correct.</span>
+                        </label>
+                        <label className={styles.modalFieldLabel}>Type SEND to confirm</label>
+                        <input
+                            type="text"
+                            autoComplete="off"
+                            value={messagesCommitPhrase}
+                            onChange={(e) => setMessagesCommitPhrase(e.target.value)}
+                            placeholder="SEND"
+                            disabled={messagesCommitBusy}
+                            className={styles.modalInput}
+                        />
+                        {messagesCommitError ? <p className={styles.modalError}>{messagesCommitError}</p> : null}
+                        <div className={styles.modalActions}>
+                            <button
+                                type="button"
+                                className="btn btn-secondary"
+                                disabled={messagesCommitBusy}
+                                onClick={() => !messagesCommitBusy && setMessagesModalOpen(false)}
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                className="btn btn-primary"
+                                disabled={messagesCommitBusy}
+                                onClick={() => void submitCommitMessages()}
+                            >
+                                {messagesCommitBusy ? 'Sending…' : `Send ${pendingMessages.willSendCount} messages`}
+                            </button>
+                        </div>
                     </div>
-                ) : null}
-            </div>
+                </div>
+            ) : null}
         </div>
     );
 }

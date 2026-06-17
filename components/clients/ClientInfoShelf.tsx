@@ -1403,7 +1403,7 @@ export function ClientInfoShelf({
                                     color: (() => {
                                         const status = client?.screeningStatus || 'not_started';
                                         switch (status) {
-                                            case 'waiting_approval': return '#48be85';
+                                            case 'waiting_approval': return 'var(--color-brand-600)';
                                             case 'approved': return 'var(--color-success)';
                                             case 'rejected': return 'var(--color-danger)';
                                             default: return 'var(--text-tertiary)';
@@ -1446,7 +1446,7 @@ export function ClientInfoShelf({
                                     <div key={sub.id} className={styles.submissionCard} style={{ borderLeftColor: getStatusColor(sub.status) }}>
                                         <div className={styles.subHeader}>
                                             <div className={styles.subMeta}>
-                                                {sub.status === 'accepted' && <CheckCircle size={16} color="#10b981" />}
+                                                {sub.status === 'accepted' && <CheckCircle size={16} color="#2563eb" />}
                                                 {sub.status === 'rejected' && <XCircle size={16} color="#ef4444" />}
                                                 {sub.status === 'pending' && <Clock size={16} color="#f59e0b" />}
                                                 <span className={styles.subDate}>{new Date(sub.created_at).toLocaleDateString()}</span>
@@ -1561,7 +1561,7 @@ export function ClientInfoShelf({
 
 function getStatusColor(status: string) {
     switch (status) {
-        case 'accepted': return '#10b981';
+        case 'accepted': return '#2563eb';
         case 'rejected': return '#ef4444';
         case 'pending': return '#f59e0b';
         default: return '#6b7280';

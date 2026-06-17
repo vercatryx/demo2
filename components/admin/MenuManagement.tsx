@@ -867,7 +867,7 @@ function SortableMenuItem({ item, onEdit }: { item: MenuItem, onEdit: (i: MenuIt
             <span style={{ flex: 1, fontSize: '1.1rem' }}>{getItemPoints(item)}</span>
             <span style={{ flex: 1, fontSize: '1.1rem' }}>{item.priceEach ?? '-'}</span>
             <span style={{ flex: 1 }}>
-                {item.isActive ? <span className="badge" style={{ color: 'var(--color-success)', background: 'rgba(34, 197, 94, 0.1)', fontSize: '0.9rem', padding: '4px 12px' }}>Active</span> : <span className="badge" style={{ fontSize: '0.9rem', padding: '4px 12px' }}>Inactive</span>}
+                {item.isActive ? <span className="badge badge-success" style={{ fontSize: '0.9rem', padding: '4px 12px' }}>Active</span> : <span className="badge" style={{ fontSize: '0.9rem', padding: '4px 12px' }}>Inactive</span>}
             </span>
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', width: '120px' }}>
                 <button

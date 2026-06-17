@@ -401,7 +401,7 @@ export default function VerifyOrderPage() {
             <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', flexDirection: 'column', gap: '20px', padding: '20px', background: 'var(--bg-primary)' }}>
                 {submission.status === 'accepted' ? (
                     <>
-                        <CheckCircle size={64} color="#10b981" />
+                        <CheckCircle size={64} color="#2563eb" />
                         <h1 style={{ fontSize: '24px', fontWeight: 'bold' }}>Screening Form Accepted!</h1>
                         {client && (
                             <p style={{ fontSize: '18px', fontWeight: '600', color: 'var(--text-primary)', marginTop: '8px' }}>

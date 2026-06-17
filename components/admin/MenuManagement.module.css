@@ -53,7 +53,7 @@
 .activeVendor {
     background-color: var(--color-primary);
     border-color: var(--color-primary);
-    color: #000000;
+    color: #ffffff;
     font-weight: 600;
     box-shadow: var(--shadow-sm);
 }

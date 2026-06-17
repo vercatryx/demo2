@@ -45,7 +45,7 @@
     width: 24px;
     height: 24px;
     background: var(--color-primary);
-    color: #000000;
+    color: #ffffff;
     border-radius: 50%;
     display: flex;
     align-items: center;
@@ -73,7 +73,7 @@
 }
 
 .summaryIcon {
-    color: #15803d;
+    color: #1d4ed8;
     opacity: 1;
     flex-shrink: 0;
     margin-top: 2px;

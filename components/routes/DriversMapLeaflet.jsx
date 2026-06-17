@@ -15,12 +15,10 @@ import {
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import MapLoadingOverlay from "./MapLoadingOverlay";
-import { APP_LOGO_PATH } from "@/lib/brand";
-
 /* ==================== Config / constants ==================== */
 
 // Selection colors
-const SELECTION_PIN_COLOR = "#48be85";
+const SELECTION_PIN_COLOR = "#2563eb";
 const SELECTION_RING_COLOR = "rgba(235,247,7,0.55)"; // halo/glow
 
 // Icon geometry
@@ -419,7 +417,7 @@ async function openPreviewPopup({ map, stop, color, drivers, onDriverChange, isO
         if (s === "cancelled") return "#ef4444";
         if (s === "waiting_for_proof") return "#f59e0b";
         if (s === "billing_pending") return "#8b5cf6";
-        if (s === "completed") return "#16a34a";
+        if (s === "completed") return "#2563eb";
         return "#3b82f6";
     };
     
@@ -2475,7 +2473,7 @@ export default function DriversMapLeaflet({
                 </MapContainer>
 
                 {/* Loading overlay (separate component) */}
-                <MapLoadingOverlay show={showOverlay} logoSrc={logoSrc || APP_LOGO_PATH} />
+                <MapLoadingOverlay show={showOverlay} />
             </div>
         </div>
     );

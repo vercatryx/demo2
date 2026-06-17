@@ -404,7 +404,7 @@ export function OrderDeliveryFlow({ order }: { order: OrderDetails }) {
                         onClick={handleUpload}
                         disabled={proofShots.length === 0}
                         className="btn-primary"
-                        style={{ backgroundColor: '#16a34a', opacity: proofShots.length === 0 ? 0.5 : 1 }}
+                        style={{ backgroundColor: '#2563eb', opacity: proofShots.length === 0 ? 0.5 : 1 }}
                     >
                         <Upload size={24} />
                         {proofShots.length === 0
@@ -448,7 +448,7 @@ export function OrderDeliveryFlow({ order }: { order: OrderDetails }) {
 
     if (step === 'SUCCESS') {
         return (
-            <div className="delivery-card text-center" style={{ marginTop: '2.5rem', borderColor: 'rgba(34, 197, 94, 0.3)' }}>
+            <div className="delivery-card text-center" style={{ marginTop: '2.5rem', borderColor: 'rgba(37, 99, 235, 0.3)' }}>
                 <div className="success-icon">
                     <CheckCircle size={48} />
                 </div>
@@ -475,8 +475,8 @@ export function OrderDeliveryFlow({ order }: { order: OrderDetails }) {
                                 justifyContent: 'center',
                                 gap: '0.5rem',
                                 padding: '0.75rem',
-                                background: 'rgba(34, 197, 94, 0.1)',
-                                border: '1px solid rgba(34, 197, 94, 0.3)',
+                                background: 'rgba(37, 99, 235, 0.1)',
+                                border: '1px solid rgba(37, 99, 235, 0.3)',
                                 borderRadius: '0.5rem',
                                 color: '#4ade80',
                                 textDecoration: 'none',

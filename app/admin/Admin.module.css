@@ -1,69 +1,61 @@
 .container {
     max-width: 100%;
     margin: 0;
-    padding: 0 var(--spacing-sm);
 }
 
 .header {
-    margin-bottom: var(--spacing-xs);
+    margin-bottom: var(--spacing-lg);
 }
 
 .title {
-    font-size: 1.875rem;
-    font-weight: 700;
+    font-size: 1.5rem;
+    font-weight: 600;
+    letter-spacing: -0.025em;
     color: var(--text-primary);
     margin-bottom: 0;
 }
 
 .subtitle {
-    color: var(--text-secondary);
+    margin-top: 0.25rem;
+    font-size: 0.875rem;
+    color: var(--text-tertiary);
 }
 
 .tabs {
-    display: flex;
-    gap: var(--spacing-sm);
-    border-bottom: 1px solid var(--border-color);
-    margin-bottom: var(--spacing-md);
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0.125rem;
+    padding: 0.125rem;
+    background: var(--bg-surface-hover);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--spacing-lg);
     overflow-x: auto;
-    padding-bottom: 2px;
+    max-width: 100%;
 }
 
 .tab {
-    background: none;
-    border: 1px solid transparent;
-    padding: 0.5rem 1rem;
+    background: transparent;
+    border: none;
+    padding: 0.4375rem 0.875rem;
     color: var(--text-secondary);
-    font-weight: 600;
+    font-weight: 500;
+    font-size: 0.875rem;
     cursor: pointer;
-    border-radius: var(--radius-md);
-    transition: all 0.2s ease;
+    border-radius: calc(var(--radius-md) - 2px);
+    transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
     white-space: nowrap;
 }
 
-.tab:hover {
+.tab:hover:not(.activeTab) {
     color: var(--text-primary);
-    background-color: var(--bg-surface-hover);
 }
 
 .activeTab {
-    background-color: var(--color-primary);
-    color: #000000;
+    background-color: var(--bg-surface);
+    color: var(--color-brand-700);
     box-shadow: var(--shadow-sm);
-    border-color: rgba(0, 0, 0, 0.1);
 }
 
 .content {
-    animation: fadeIn 0.3s ease-out;
-}
-
-@keyframes fadeIn {
-    from {
-        opacity: 0;
-        transform: translateY(5px);
-    }
-
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
 }

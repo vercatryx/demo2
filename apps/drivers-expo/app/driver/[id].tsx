@@ -182,7 +182,7 @@ export default function DriverDetailScreen() {
                                 hasProof && styles.cardOk,
                             ]}
                         >
-                            <View style={[styles.rail, { backgroundColor: hasProof ? '#059669' : brand }]} />
+                            <View style={[styles.rail, { backgroundColor: hasProof ? '#2563eb' : brand }]} />
                             <View style={styles.cardBody}>
                                 <View style={styles.rowTop}>
                                     <View style={styles.pill}>
@@ -292,7 +292,7 @@ const styles = StyleSheet.create({
         borderColor: '#e8eaef',
     },
     cardDup: { backgroundColor: '#fefce8' },
-    cardOk: { borderColor: '#a7f3d0', backgroundColor: '#ecfdf5' },
+    cardOk: { borderColor: '#bfdbfe', backgroundColor: '#eff6ff' },
     rail: { width: 6 },
     cardBody: { flex: 1, padding: 14 },
     rowTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, flexWrap: 'wrap' },
@@ -317,7 +317,7 @@ const styles = StyleSheet.create({
         color: '#6b7280',
         fontWeight: '600',
     },
-    chipOk: { borderColor: '#10b981', color: '#059669', backgroundColor: '#ecfdf5' },
+    chipOk: { borderColor: '#2563eb', color: '#2563eb', backgroundColor: '#eff6ff' },
     addr: { marginTop: 8, color: '#374151', fontSize: 15, lineHeight: 20 },
     orderLine: { marginTop: 6, fontSize: 12, color: '#4b5563', backgroundColor: '#f3f4f6', padding: 8, borderRadius: 8 },
     actions: { marginTop: 12, gap: 10 },

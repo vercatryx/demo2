@@ -1614,9 +1614,9 @@ export function VendorDeliveryOrders({ vendorId, deliveryDate, isVendorView }: P
                                             <div style={{ display: 'grid', gap: 'var(--spacing-md)' }}>
                                                 <div style={{
                                                     padding: 'var(--spacing-sm)',
-                                                    backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                                                    backgroundColor: 'rgba(37, 99, 235, 0.1)',
                                                     borderRadius: 'var(--radius-sm)',
-                                                    border: '1px solid rgba(34, 197, 94, 0.2)',
+                                                    border: '1px solid rgba(37, 99, 235, 0.2)',
                                                     color: 'var(--color-success)',
                                                     fontSize: '0.875rem',
                                                     fontWeight: 600
@@ -1643,9 +1643,9 @@ export function VendorDeliveryOrders({ vendorId, deliveryDate, isVendorView }: P
                                                     {summaryModal.results.map((result, idx) => (
                                                         <div key={idx} style={{
                                                             padding: 'var(--spacing-sm)',
-                                                            backgroundColor: result.success ? 'rgba(34, 197, 94, 0.05)' : 'rgba(239, 68, 68, 0.05)',
+                                                            backgroundColor: result.success ? 'rgba(37, 99, 235, 0.05)' : 'rgba(239, 68, 68, 0.05)',
                                                             borderRadius: 'var(--radius-sm)',
-                                                            border: `1px solid ${result.success ? 'rgba(34, 197, 94, 0.2)' : 'rgba(239, 68, 68, 0.2)'}`
+                                                            border: `1px solid ${result.success ? 'rgba(37, 99, 235, 0.2)' : 'rgba(239, 68, 68, 0.2)'}`
                                                         }}>
                                                             <div style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.25rem' }}>
                                                                 Order ID: {result.orderId}

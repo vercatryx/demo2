@@ -332,7 +332,7 @@ export function SavedMealPlanMonth({ clientId, onOrdersChange, onEditedDatesChan
 
   // When loadByMonth (portal): fetch that month when user changes calendar month (prev/next).
   // Skip fetch only when we're on the initial month AND orders already contain dates for that month
-  // (so we didn't navigate away). Otherwise always fetch so e.g. March → April → March shows green again.
+  // (so we didn't navigate away). Otherwise always fetch so e.g. March → April → March shows the highlight again.
   useEffect(() => {
     if (!loadByMonth || !effectiveClientId) return;
     const y = calendarMonth.getFullYear();
@@ -457,7 +457,7 @@ export function SavedMealPlanMonth({ clientId, onOrdersChange, onEditedDatesChan
   return (
     <div className={styles.wrapper}>
       <header className={styles.header}>
-        <p className={styles.titleSimple}>Click on a day marked in green to customize the orders for that day.</p>
+        <p className={styles.titleSimple}>Click on a day marked in blue to customize the orders for that day.</p>
       </header>
 
       {!effectiveClientId && (clientId !== 'new' || orders.length === 0) ? (

@@ -2864,8 +2864,8 @@ export function ClientPortalInterface({ client: initialClient, householdPeople =
                         bottom: 0,
                         left: 0,
                         right: 0,
-                        backgroundColor: saving ? '#d1fae5' : mealPlanMismatch ? '#fef2f2' : '#fef3c7',
-                        borderTop: saving ? '4px solid #10b981' : mealPlanMismatch ? '4px solid #dc2626' : '4px solid #f59e0b',
+                        backgroundColor: saving ? '#eff6ff' : mealPlanMismatch ? '#fef2f2' : '#fef3c7',
+                        borderTop: saving ? '4px solid #2563eb' : mealPlanMismatch ? '4px solid #dc2626' : '4px solid #f59e0b',
                         boxShadow: saving ? '0 -10px 30px -5px rgba(16, 185, 129, 0.4)' : mealPlanMismatch ? '0 -10px 30px -5px rgba(220, 38, 38, 0.4)' : '0 -10px 30px -5px rgba(245, 158, 11, 0.4)',
                         zIndex: 1000,
                         backdropFilter: 'blur(10px)'
@@ -2884,17 +2884,17 @@ export function ClientPortalInterface({ client: initialClient, householdPeople =
                             }}>
                                 {saving ? (
                                     <>
-                                        <Loader2 className="save-bar-icon animate-spin" size={24} style={{ color: '#059669', flexShrink: 0 }} />
+                                        <Loader2 className="save-bar-icon animate-spin" size={24} style={{ color: '#2563eb', flexShrink: 0 }} />
                                         <div style={{ flex: 1 }}>
                                             <div className="save-bar-title" style={{
                                                 fontWeight: 700,
-                                                color: '#059669',
+                                                color: '#2563eb',
                                                 marginBottom: '0.25rem'
                                             }}>
                                                 💾 SAVING CHANGES...
                                             </div>
                                             <div className="save-bar-message" style={{
-                                                color: '#047857',
+                                                color: '#1d4ed8',
                                                 fontWeight: 600
                                             }}>
                                                 Please wait while your changes are being saved to the database
@@ -2969,7 +2969,7 @@ export function ClientPortalInterface({ client: initialClient, householdPeople =
                                         width: '100%',
                                         marginTop: '0.35rem',
                                         fontWeight: 700,
-                                        color: message.toLowerCase().includes('error') ? '#991b1b' : '#065f46'
+                                        color: message.toLowerCase().includes('error') ? '#991b1b' : '#1d4ed8'
                                     }}
                                 >
                                     {message}
@@ -2996,8 +2996,8 @@ export function ClientPortalInterface({ client: initialClient, householdPeople =
                                     style={{
                                         fontWeight: 700,
                                         boxShadow: saving ? '0 4px 8px -2px rgba(0, 0, 0, 0.2)' : mealPlanMismatchBlocksSave ? '0 4px 8px -2px rgba(0, 0, 0, 0.2)' : '0 8px 16px -4px rgba(0, 0, 0, 0.3)',
-                                        backgroundColor: saving ? '#10b981' : mealPlanMismatchBlocksSave ? '#9ca3af' : '#f59e0b',
-                                        border: saving ? '2px solid #059669' : mealPlanMismatchBlocksSave ? '2px solid #6b7280' : '2px solid #d97706',
+                                        backgroundColor: saving ? '#2563eb' : mealPlanMismatchBlocksSave ? '#9ca3af' : '#f59e0b',
+                                        border: saving ? '2px solid #2563eb' : mealPlanMismatchBlocksSave ? '2px solid #6b7280' : '2px solid #d97706',
                                         color: '#1f2937',
                                         transform: saving || mealPlanMismatchBlocksSave ? 'scale(1)' : 'scale(1.05)',
                                         transition: 'all 0.2s',

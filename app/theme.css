@@ -1,59 +1,72 @@
 :root {
-    /* 
-    Brand Color Configuration 
-  */
-    --color-brand: #48be85;
-    --color-primary: var(--color-brand);
-    --color-primary-rgb: 72, 190, 133;
+  /* Brand — Dial Haven blue scale */
+  --color-brand-50: #eff6ff;
+  --color-brand-100: #dbeafe;
+  --color-brand-200: #bfdbfe;
+  --color-brand-300: #93c5fd;
+  --color-brand-400: #60a5fa;
+  --color-brand-500: #3b82f6;
+  --color-brand-600: #2563eb;
+  --color-brand-700: #1d4ed8;
 
-    /* Hover state: Slightly darker green */
-    --color-primary-hover: #3da873;
+  --color-brand: var(--color-brand-600);
+  --color-primary: var(--color-brand);
+  --color-primary-rgb: 37, 99, 235;
+  --color-primary-hover: var(--color-brand-700);
+  --color-primary-light: var(--color-brand-50);
 
+  /* Surfaces & text — slate palette */
+  --bg-app: #f8fafc;
+  --bg-surface: #ffffff;
+  --bg-surface-hover: #f1f5f9;
+  --bg-panel: #ffffff;
+  --bg-muted: rgba(248, 250, 252, 0.6);
 
-    /* 
-    Other Theme Colors 
-  */
-    --bg-app: #f8fafc;
-    /* Slate 50 */
-    --bg-surface: #ffffff;
-    --bg-surface-hover: #f1f5f9;
-    /* Slate 100 */
-    --bg-panel: #ffffff;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-tertiary: #64748b;
+  --text-muted: #94a3b8;
 
-    --text-primary: #020617;
-    /* Slate 950 - Almost Black */
-    --text-secondary: #334155;
-    /* Slate 700 */
-    --text-tertiary: #64748b;
-    /* Slate 500 */
+  /* Semantic colors — match Dial Haven (emerald success, not brand blue) */
+  --color-accent: var(--color-brand-600);
+  --color-danger: #e11d48;
+  --color-danger-soft: #fff1f2;
+  --color-danger-border: #fecdd3;
+  --color-success: #10b981;
+  --color-success-soft: #ecfdf5;
+  --color-success-border: #a7f3d0;
+  --color-warning: #d97706;
+  --color-warning-soft: #fffbeb;
+  --color-warning-border: #fde68a;
+  --color-info: #0284c7;
+  --color-info-soft: #f0f9ff;
+  --color-info-border: #bae6fd;
 
-    --color-accent: #4f46e5;
-    /* Indigo */
-    --color-danger: #ef4444;
-    /* Red */
-    --color-success: #15803d;
-    /* Dark Emerald */
-    --color-warning: #b45309;
-    /* Dark Amber */
+  --border-color: #e2e8f0;
+  --border-color-light: #f1f5f9;
+  --border-color-strong: #cbd5e1;
 
-    --border-color: #cbd5e1;
-    /* Slate 300 */
-    --border-color-light: #e2e8f0;
-    /* Slate 200 */
+  /* Radius — Dial Haven uses rounded-lg (8px) and rounded-xl (12px) */
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 0.75rem;
+  --radius-2xl: 1rem;
+  --radius-full: 9999px;
 
-    /* 
-    Effects & Spacing 
-  */
-    --glass-bg: rgba(255, 255, 255, 0.9);
-    --glass-border: rgba(0, 0, 0, 0.1);
-    --backdrop-blur: 12px;
+  /* Shadows — light, Dial Haven style */
+  --shadow-sm: 0 1px 2px 0 rgb(15 23 42 / 0.05);
+  --shadow-md: 0 1px 3px 0 rgb(15 23 42 / 0.08);
+  --shadow-lg: 0 4px 6px -1px rgb(15 23 42 / 0.08);
+  --shadow-xl: 0 10px 15px -3px rgb(15 23 42 / 0.08);
+  --shadow-popover: 0 10px 25px -5px rgb(15 23 42 / 0.12);
 
-    --radius-sm: 0.375rem;
-    --radius-md: 0.5rem;
-    --radius-lg: 0.75rem;
-    --radius-xl: 1rem;
+  /* Layout */
+  --sidebar-width: 240px;
+  --sidebar-collapsed-width: 72px;
+  --content-padding-x: 1.5rem;
+  --content-padding-y: 1.5rem;
 
-    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
-    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  /* Focus ring */
+  --focus-ring: 0 0 0 2px rgba(59, 130, 246, 0.3);
 }

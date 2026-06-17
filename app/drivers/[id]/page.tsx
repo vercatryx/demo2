@@ -563,7 +563,7 @@ export default function DriverDetailPage() {
 
                     return (
                         <div key={s.id} id={`stop-${s.id}`} className={`card stop-card ${hasProof ? "stop-card-has-proof" : ""} ${s.hasDuplicateAtAddress ? "duplicate-address" : ""}`}>
-                            <div className="color-rail" style={{ background: hasProof ? "#059669" : "var(--brand)" }} />
+                            <div className="color-rail" style={{ background: hasProof ? "#2563eb" : "var(--brand)" }} />
                             <div className="card-content">
                                 <div className="row top">
                                     <div className="main">
@@ -784,7 +784,7 @@ export default function DriverDetailPage() {
                     __html: `:root{
   --bg:#f7f8fb; --border:#e8eaef; --muted:#6b7280; --radius:14px;
   --shadow:0 6px 18px rgba(16,24,40,.06), 0 1px 6px rgba(16,24,40,.05);
-  --success:#16a34a; --tap: rgba(0,0,0,.06);
+  --success:#2563eb; --tap: rgba(0,0,0,.06);
   --proofbar:#0ea5e9;
 }
 *{box-sizing:border-box}
@@ -813,9 +813,9 @@ html,body{margin:0;padding:0;background:var(--bg);color:#111;
 .proof-actions{display:flex;flex-direction:column;gap:6px}
 .proof-actions .btn{margin:0}
 .hidden-input{position:absolute;width:0;height:0;opacity:0;pointer-events:none}
-.chip.chip-ok{background:#ecfdf5;border-color:#10b981;color:#059669}
-.stop-card-has-proof{border-color:#a7f3d0;background:#ecfdf5}
-.stop-card-has-proof .color-rail{background:#059669}
+.chip.chip-ok{background:#eff6ff;border-color:#2563eb;color:#2563eb}
+.stop-card-has-proof{border-color:#bfdbfe;background:#eff6ff}
+.stop-card-has-proof .color-rail{background:#2563eb}
 .no-camera-msg{display:block;padding:10px 14px;font-size:13px;color:var(--muted);background:#f8fafc;border-radius:12px;border:1px solid var(--border)}
 
 .desktop-only{display:none}

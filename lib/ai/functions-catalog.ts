@@ -32,9 +32,9 @@ export const CATEGORIES: Record<FunctionCategory, CategoryMeta> = {
         id: 'read',
         label: 'Look up information',
         description: 'These functions read data. They never change anything.',
-        accent: '#22c55e',
-        accentSoft: 'rgba(34, 197, 94, 0.12)',
-        border: 'rgba(34, 197, 94, 0.45)',
+        accent: '#2563eb',
+        accentSoft: 'rgba(37, 99, 235, 0.12)',
+        border: 'rgba(37, 99, 235, 0.45)',
         badge: 'READ-ONLY',
         icon: 'Eye'
     },

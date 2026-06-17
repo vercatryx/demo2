@@ -371,7 +371,7 @@
 
 .activeService {
     background-color: var(--color-primary);
-    color: #000000;
+    color: #ffffff;
     box-shadow: var(--shadow-sm);
     font-weight: 600;
 }
@@ -593,7 +593,7 @@
 
 .activeTab {
     background: var(--color-primary) !important;
-    color: #000000 !important;
+    color: #ffffff !important;
     box-shadow: var(--shadow-sm);
     font-weight: 600;
 }

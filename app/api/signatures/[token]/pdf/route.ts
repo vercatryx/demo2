@@ -8,9 +8,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PDFDocument, rgb, StandardFonts, PDFFont } from "pdf-lib";
 import { supabase } from "@/lib/supabase";
-import * as fs from "fs";
-import * as path from "path";
-import { APP_LOGO_FILENAME } from "@/lib/brand";
 
 const BILL_DATE_DEFAULT = "2026-02-16";
 
@@ -24,19 +21,6 @@ function addDays(iso: string, days: number): string {
     const d = new Date(iso + "T00:00:00Z");
     d.setUTCDate(d.getUTCDate() + days);
     return d.toISOString().slice(0, 10);
-}
-
-async function fetchLogoBytes(): Promise<Uint8Array | null> {
-    try {
-        const publicPath = path.join(process.cwd(), "public", APP_LOGO_FILENAME);
-        if (fs.existsSync(publicPath)) {
-            const buf = fs.readFileSync(publicPath);
-            return new Uint8Array(buf);
-        }
-    } catch {
-        // ignore
-    }
-    return null;
 }
 
 type Stroke = Array<{ x: number; y: number; t?: number }>;
@@ -180,24 +164,6 @@ export async function GET(
         const lineGap = 18;
         let y = 760;
         const usableWidth = page.getWidth() - margin * 2.5;
-
-        const logoBytes = await fetchLogoBytes();
-        if (logoBytes) {
-            try {
-                const logoImg = await pdf.embedPng(logoBytes).catch(async () => await pdf.embedJpg(logoBytes));
-                const maxW = 240,
-                    maxH = 70;
-                const scale = Math.min(maxW / logoImg.width, maxH / logoImg.height, 1);
-                const drawW = logoImg.width * scale;
-                const drawH = logoImg.height * scale;
-                const xLogo = (page.getWidth() - drawW) / 2;
-                const yLogo = y - drawH;
-                page.drawImage(logoImg, { x: xLogo, y: yLogo, width: drawW, height: drawH });
-                y = yLogo - 18;
-            } catch {
-                //
-            }
-        }
 
         const attestationTitle =
             "Member attestation of MEDICALLY TAILORED OR NUTRITIONALLY APPROPRIATE FOOD PRESCRIPTIONS";

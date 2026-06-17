@@ -3,7 +3,6 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
-import { APP_LOGO_PATH } from "@/lib/brand";
 
 type Pt = { x: number; y: number; t: number };
 type Stroke = Pt[];
@@ -90,17 +89,6 @@ function todayString() {
     const dd = String(d.getDate()).padStart(2, "0");
     const yyyy = d.getFullYear();
     return `${mm}/${dd}/${yyyy}`;
-}
-
-async function fetchLogoBytes(): Promise<Uint8Array | null> {
-    try {
-        const r = await fetch(APP_LOGO_PATH, { cache: "reload" });
-        if (!r.ok) return null;
-        const buf = await r.arrayBuffer();
-        return new Uint8Array(buf);
-    } catch {
-        return null;
-    }
 }
 
 export default function SignaturesViewPage() {
@@ -369,21 +357,6 @@ export default function SignaturesViewPage() {
             let y = 760;
 
             const usableWidth = page.getWidth() - margin * 2.5;
-
-            const logoBytes = await fetchLogoBytes();
-            if (logoBytes) {
-                try {
-                    const logoImg = await pdf.embedPng(logoBytes).catch(async () => await pdf.embedJpg(logoBytes));
-                    const maxW = 240, maxH = 70;
-                    const scale = Math.min(maxW / logoImg.width, maxH / logoImg.height, 1);
-                    const drawW = logoImg.width * scale;
-                    const drawH = logoImg.height * scale;
-                    const xLogo = (page.getWidth() - drawW) / 2;
-                    const yLogo = y - drawH;
-                    page.drawImage(logoImg, { x: xLogo, y: yLogo, width: drawW, height: drawH });
-                    y = yLogo - 18;
-                } catch { }
-            }
 
             const attestationTitle =
                 "Member attestation of MEDICALLY TAILORED OR NUTRITIONALLY APPROPRIATE FOOD PRESCRIPTIONS";

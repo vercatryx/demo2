@@ -1,34 +1,32 @@
 /**
  * Server-side vector PDF for client invoices (public /api/client-invoice-pdf).
- * Layout and palette are tuned for print: soft greens, gradients, calm typography.
+ * Layout and palette are tuned for print: soft brand blues, gradients, calm typography.
  */
 
-import { existsSync, readFileSync } from 'fs';
-import path from 'path';
 import { jsPDF } from 'jspdf';
-import { APP_LOGO_FILENAME } from '@/lib/brand';
+import { APP_BRAND_NAME } from '@/lib/brand';
 import type { ClientInvoiceApiPayload } from '@/lib/invoice/build-client-invoice-payload';
 import { formatInvoiceMoney } from '@/lib/invoice/build-client-invoice-payload';
 import { invoiceOrgContactOneLine, invoiceOrgFooterTagline } from '@/lib/invoice/invoice-org-footer';
 
-/** Core palette (RGB) */
+/** Core palette (RGB) — synced with app brand blue */
 const C = {
-    pageBg: [252, 253, 252] as [number, number, number],
-    ink: [30, 41, 59] as [number, number, number],
+    pageBg: [248, 250, 252] as [number, number, number],
+    ink: [15, 23, 42] as [number, number, number],
     inkMuted: [100, 116, 139] as [number, number, number],
-    accent: [21, 128, 61] as [number, number, number],
-    accentSoft: [34, 160, 95] as [number, number, number],
+    accent: [37, 99, 235] as [number, number, number],
+    accentSoft: [59, 130, 246] as [number, number, number],
     lineSubtle: [226, 232, 240] as [number, number, number],
     cardFill: [248, 250, 252] as [number, number, number],
     cardStroke: [203, 213, 225] as [number, number, number],
-    tableHead: [22, 101, 52] as [number, number, number],
+    tableHead: [29, 78, 216] as [number, number, number],
     tableHeadText: [255, 255, 255] as [number, number, number],
     rowAlt: [248, 250, 252] as [number, number, number],
-    totalBg: [220, 252, 231] as [number, number, number],
-    gradHeaderTop: [209, 250, 229] as [number, number, number],
+    totalBg: [239, 246, 255] as [number, number, number],
+    gradHeaderTop: [219, 234, 254] as [number, number, number],
     gradHeaderBot: [255, 255, 255] as [number, number, number],
     gradFooterTop: [255, 255, 255] as [number, number, number],
-    gradFooterBot: [214, 249, 202] as [number, number, number],
+    gradFooterBot: [219, 234, 254] as [number, number, number],
 };
 
 function sanitizeFilenameBase(name: string): string {
@@ -109,19 +107,12 @@ export function buildClientInvoicePdfBytes(payload: ClientInvoiceApiPayload): Ui
     setDraw(doc, C.lineSubtle, 0.12);
     doc.line(0, HEADER_BAND, pageW, HEADER_BAND);
 
-    // --- Logo ---
-    const logoPath = path.join(process.cwd(), 'public', APP_LOGO_FILENAME);
-    const logoW = 54;
-    const logoH = 18.5;
+    // --- Brand wordmark (legacy PNG is deprecated) ---
     const logoY = 9;
-    if (existsSync(logoPath)) {
-        try {
-            const b64 = readFileSync(logoPath).toString('base64');
-            doc.addImage(`data:image/png;base64,${b64}`, 'PNG', m, logoY, logoW, logoH);
-        } catch {
-            /* skip */
-        }
-    }
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(13);
+    setText(doc, C.accent);
+    doc.text(APP_BRAND_NAME, m, logoY + 11);
 
     // --- Title (right, in band) ---
     doc.setFont('helvetica', 'bold');

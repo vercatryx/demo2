@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none" role="img" aria-label="Client Food Service">
+  <defs>
+    <linearGradient id="cfs-brand" x1="4" y1="4" x2="44" y2="44" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3b82f6"/>
+      <stop offset="1" stop-color="#1d4ed8"/>
+    </linearGradient>
+  </defs>
+  <rect width="48" height="48" rx="12" fill="url(#cfs-brand)"/>
+  <path d="M16 14v14M16 14c0-1.657 1.343-3 3-3s3 1.343 3 3v14M22 28v4M16 32h12" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M29 14v8c0 2.761 2.239 5 5 5h1" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M34 14v20" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+</svg>

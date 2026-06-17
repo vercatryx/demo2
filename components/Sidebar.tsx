@@ -2,12 +2,11 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import Image from 'next/image';
 import {
     Users,
     ChevronLeft,
     ChevronRight,
-    LogOut,
+    ChevronDown,
     Download,
     History,
     Settings,
@@ -23,6 +22,11 @@ import {
     FileText,
     Database,
     Mail,
+    Shield,
+    Utensils,
+    Box,
+    LayoutTemplate,
+    type LucideIcon,
 } from 'lucide-react';
 import {
     canAccessAdminPanel,
@@ -30,43 +34,143 @@ import {
     canAccessBilling,
     isBrooklynAdmin,
 } from '@/lib/role-access';
-import { APP_LOGO_PATH } from '@/lib/brand';
+import { AppBrand } from '@/components/AppBrand';
 import styles from './Sidebar.module.css';
 import { logout } from '@/lib/auth-actions';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { getNavigatorLogs } from '@/lib/actions';
-
-const navItems = [
-    { label: 'Client Dashboard', href: '/clients', icon: Users },
-    { label: 'Meal Plan Edits', href: '/meal-plan-edits', icon: CalendarCheck },
-    { label: 'Missing Orders', href: '/missing-orders', icon: AlertTriangle },
-    { label: 'Billing', href: '/billing', icon: CreditCard },
-    { label: 'Invoice', href: '/invoice', icon: FileText },
-    { label: 'Changes', href: '/admin/changes', icon: ScrollText },
-    { label: 'Pending screenings', href: '/pending-screenings', icon: ClipboardList },
-    { label: 'My History', href: '/navigator-history', icon: History, role: 'navigator' },
-    { label: 'Downloads', href: '/vendors', icon: Download },
-    { label: 'Portal (meal plan)', href: '/portal-preview/dietcombo', icon: Users },
-    { label: 'Portal (classic · food)', href: '/portal-preview/triangle/food', icon: Users },
-    { label: 'Portal (classic · boxes)', href: '/portal-preview/triangle/boxes', icon: Users },
-    { label: 'Produce', href: '/vendors/produce', icon: Package },
-    { label: 'Routes', href: '/routes', icon: Route },
-    { label: 'AI Builder', href: '/admin/ai-builder', icon: Bot },
-    { label: 'Data Copilot', href: '/internal-data-reports', icon: Database },
-    { label: 'AI Usage', href: '/admin/ai-usage', icon: PieChart },
-    { label: 'Admin Control', href: '/admin', icon: Settings },
-    { label: 'Mass Messaging', href: '/admin/messaging', icon: Mail },
-];
-
 import { useTime } from '@/lib/time-context';
 import { SidebarActiveOrderSummary } from './SidebarActiveOrderSummary';
+
+type NavItem = {
+    label: string;
+    href: string;
+    icon: LucideIcon;
+    role?: string;
+};
+
+type NavSection = {
+    id: string;
+    label: string;
+    items: NavItem[];
+};
+
+const navSections: NavSection[] = [
+    {
+        id: 'clients',
+        label: 'Clients',
+        items: [
+            { label: 'Client Dashboard', href: '/clients', icon: Users },
+            { label: 'Meal Plan Edits', href: '/meal-plan-edits', icon: CalendarCheck },
+            { label: 'Missing Orders', href: '/missing-orders', icon: AlertTriangle },
+            { label: 'Pending screenings', href: '/pending-screenings', icon: ClipboardList },
+            { label: 'My History', href: '/navigator-history', icon: History, role: 'navigator' },
+        ],
+    },
+    {
+        id: 'billing',
+        label: 'Billing',
+        items: [
+            { label: 'Billing', href: '/billing', icon: CreditCard },
+            { label: 'Invoice', href: '/invoice', icon: FileText },
+        ],
+    },
+    {
+        id: 'delivery',
+        label: 'Delivery',
+        items: [
+            { label: 'Routes', href: '/routes', icon: Route },
+            { label: 'Downloads', href: '/vendors', icon: Download },
+            { label: 'Produce', href: '/vendors/produce', icon: Package },
+        ],
+    },
+    {
+        id: 'portals',
+        label: 'Portals',
+        items: [
+            { label: 'Portal (meal plan)', href: '/portal-preview/dietcombo', icon: LayoutTemplate },
+            { label: 'Portal (classic · food)', href: '/portal-preview/triangle/food', icon: Utensils },
+            { label: 'Portal (classic · boxes)', href: '/portal-preview/triangle/boxes', icon: Box },
+        ],
+    },
+    {
+        id: 'admin',
+        label: 'Admin',
+        items: [
+            { label: 'Changes', href: '/admin/changes', icon: ScrollText },
+            { label: 'Admin Control', href: '/admin', icon: Settings },
+            { label: 'Mass Messaging', href: '/admin/messaging', icon: Mail },
+            { label: 'Account Permissions', href: '/admin/account-permissions', icon: Shield },
+        ],
+    },
+    {
+        id: 'ai',
+        label: 'AI Tools',
+        items: [
+            { label: 'AI Builder', href: '/admin/ai-builder', icon: Bot },
+            { label: 'Data Copilot', href: '/internal-data-reports', icon: Database },
+            { label: 'AI Usage', href: '/admin/ai-usage', icon: PieChart },
+        ],
+    },
+];
+
+function isNavItemVisible(item: NavItem, userRole: string): boolean {
+    if (isBrooklynAdmin(userRole)) {
+        return ['Client Dashboard', 'Routes', 'Meal Plan Edits'].includes(item.label);
+    }
+    if (item.label === 'Pending screenings' || item.label === 'Changes' || item.label === 'Missing Orders') {
+        return canAccessAdminPanel(userRole);
+    }
+    if (item.label === 'Admin Control' || item.label === 'Downloads' || item.label === 'Produce' || item.label === 'Mass Messaging' || item.label === 'Account Permissions') {
+        return canAccessAdminPanel(userRole);
+    }
+    if (item.label === 'AI Builder' || item.label === 'AI Usage' || item.label === 'Data Copilot') {
+        return canAccessAiTools(userRole);
+    }
+    if (item.label === 'Billing' || item.label === 'Invoice') {
+        return canAccessBilling(userRole);
+    }
+    if (item.role) {
+        return userRole === item.role;
+    }
+    return true;
+}
+
+function isItemActive(pathname: string, href: string, allHrefs: string[]): boolean {
+    const base = href.split('?')[0]!;
+    const matches = allHrefs.filter((candidate) => {
+        const candidateBase = candidate.split('?')[0]!;
+        if (candidateBase === '/admin') {
+            return pathname === '/admin' || pathname === '/admin/';
+        }
+        return pathname === candidateBase || pathname.startsWith(`${candidateBase}/`);
+    });
+
+    if (matches.length === 0) return false;
+
+    const bestMatch = matches.sort((a, b) => b.length - a.length)[0]!.split('?')[0]!;
+    return bestMatch === base;
+}
+
+function findSectionForPath(
+    sections: Array<{ id: string; items: NavItem[] }>,
+    pathname: string,
+    allHrefs: string[],
+): string | null {
+    for (const section of sections) {
+        if (section.items.some((item) => isItemActive(pathname, item.href, allHrefs))) {
+            return section.id;
+        }
+    }
+    return null;
+}
 
 export function Sidebar({
     isCollapsed = false,
     toggle,
     userName = 'Admin',
     userRole = 'admin',
-    userId = ''
+    userId = '',
 }: {
     isCollapsed?: boolean;
     toggle?: () => void;
@@ -75,52 +179,82 @@ export function Sidebar({
     userId?: string;
 }) {
     const pathname = usePathname();
-    const [isLogoutVisible, setIsLogoutVisible] = useState(false);
     const { currentTime } = useTime();
     const [todayUnits, setTodayUnits] = useState<number | null>(null);
     const [weekUnits, setWeekUnits] = useState<number | null>(null);
     const [isLoadingUnits, setIsLoadingUnits] = useState(false);
 
-    // Fetch navigator logs and calculate units for today and this week
+    const visibleSections = useMemo(
+        () =>
+            navSections
+                .map((section) => ({
+                    ...section,
+                    items: section.items.filter((item) => isNavItemVisible(item, userRole)),
+                }))
+                .filter((section) => section.items.length > 0),
+        [userRole],
+    );
+
+    const flatVisibleItems = useMemo(
+        () => visibleSections.flatMap((section) => section.items),
+        [visibleSections],
+    );
+
+    const allVisibleHrefs = useMemo(
+        () => flatVisibleItems.map((item) => item.href),
+        [flatVisibleItems],
+    );
+
+    const [openSections, setOpenSections] = useState<Set<string>>(() => new Set());
+
+    useEffect(() => {
+        const activeSectionId = findSectionForPath(visibleSections, pathname, allVisibleHrefs);
+        if (!activeSectionId) return;
+        setOpenSections((prev) => {
+            if (prev.size === 1 && prev.has(activeSectionId)) return prev;
+            return new Set([activeSectionId]);
+        });
+    }, [pathname, visibleSections, allVisibleHrefs]);
+
+    const toggleSection = (sectionId: string) => {
+        setOpenSections((prev) => {
+            if (prev.has(sectionId)) {
+                return new Set();
+            }
+            return new Set([sectionId]);
+        });
+    };
+
     const loadNavigatorUnits = useCallback(async () => {
         if (!userId) return;
-        
+
         setIsLoadingUnits(true);
         try {
             const logs = await getNavigatorLogs(userId);
-            
-            // Get current time (using fake time if set)
             const now = currentTime;
             const today = new Date(now);
             today.setHours(0, 0, 0, 0);
-            
-            // Calculate start of week (Sunday)
+
             const weekStart = new Date(today);
-            const dayOfWeek = today.getDay(); // 0 = Sunday, 1 = Monday, etc.
+            const dayOfWeek = today.getDay();
             weekStart.setDate(today.getDate() - dayOfWeek);
             weekStart.setHours(0, 0, 0, 0);
-            
-            // Calculate end of week (Saturday)
+
             const weekEnd = new Date(weekStart);
             weekEnd.setDate(weekStart.getDate() + 6);
             weekEnd.setHours(23, 59, 59, 999);
-            
-            // Calculate today's units
+
             const todayTotal = logs
-                .filter(log => {
-                    const logDate = new Date(log.createdAt);
-                    return logDate >= today;
-                })
+                .filter((log) => new Date(log.createdAt) >= today)
                 .reduce((sum, log) => sum + log.unitsAdded, 0);
-            
-            // Calculate this week's units (Sunday-Saturday)
+
             const weekTotal = logs
-                .filter(log => {
+                .filter((log) => {
                     const logDate = new Date(log.createdAt);
                     return logDate >= weekStart && logDate <= weekEnd;
                 })
                 .reduce((sum, log) => sum + log.unitsAdded, 0);
-            
+
             setTodayUnits(todayTotal);
             setWeekUnits(weekTotal);
         } catch (error) {
@@ -138,200 +272,127 @@ export function Sidebar({
         }
     }, [userRole, userId, loadNavigatorUnits]);
 
+    const renderNavItem = (item: NavItem, nested = false) => {
+        const Icon = item.icon;
+        const isActive = isItemActive(pathname, item.href, allVisibleHrefs);
+        const isMyHistory = item.label === 'My History' && userRole === 'navigator';
+
+        return (
+            <div key={item.href} className={styles.navItemWrapper}>
+                <Link
+                    href={item.href}
+                    className={`${styles.navItem} ${nested ? styles.navItemNested : ''} ${isActive ? styles.active : ''}`}
+                    title={isCollapsed ? item.label : undefined}
+                >
+                    <Icon size={18} className={styles.navIcon} aria-hidden="true" />
+                    {!isCollapsed && <span className={styles.navLabel}>{item.label}</span>}
+                </Link>
+                {isMyHistory && !isCollapsed && (
+                    <div className={styles.navigatorStats}>
+                        {isLoadingUnits ? (
+                            <div className={`${styles.statBadge} ${styles.statLoading}`}>
+                                <span>Loading</span>
+                                <span className={styles.statValue}>…</span>
+                            </div>
+                        ) : (
+                            <>
+                                {todayUnits !== null && (
+                                    <div className={styles.statBadge}>
+                                        <span>Today</span>
+                                        <span className={styles.statValue}>{todayUnits}</span>
+                                    </div>
+                                )}
+                                {weekUnits !== null && (
+                                    <div className={styles.statBadge}>
+                                        <span>This week</span>
+                                        <span className={styles.statValue}>{weekUnits}</span>
+                                    </div>
+                                )}
+                            </>
+                        )}
+                    </div>
+                )}
+            </div>
+        );
+    };
+
     return (
-        <aside
-            className={`${styles.sidebar} ${isCollapsed ? styles.collapsed : ''}`}
-        >
+        <aside className={`${styles.sidebar} ${isCollapsed ? styles.collapsed : ''}`}>
             <div className={styles.header}>
-                {!isCollapsed && (
-                    <div className={styles.logo}>
-                        <Image
-                            src={APP_LOGO_PATH}
-                            alt="Logo"
-                            width={160}
-                            height={48}
-                            className={styles.logoImage}
-                            priority
-                        />
-                    </div>
+                {!isCollapsed ? (
+                    <AppBrand variant="sidebar" className={styles.logo} />
+                ) : (
+                    <AppBrand variant="sidebarCollapsed" className={styles.logoCollapsed} />
                 )}
-                {isCollapsed && (
-                    <div className={styles.logoCollapsed}>
-                        <Image
-                            src={APP_LOGO_PATH}
-                            alt="Logo"
-                            width={48}
-                            height={48}
-                            className={styles.logoImageCollapsed}
-                            priority
-                        />
-                    </div>
-                )}
-                <button onClick={toggle} className={styles.toggleBtn}>
+                <button
+                    type="button"
+                    onClick={toggle}
+                    className={styles.toggleBtn}
+                    aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+                >
                     {isCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
                 </button>
             </div>
 
             <nav className={styles.nav}>
-                {navItems.filter((item) => {
-                    if (isBrooklynAdmin(userRole)) {
-                        return ['Client Dashboard', 'Routes', 'Meal Plan Edits'].includes(item.label);
-                    }
-                    if (item.label === 'Pending screenings' || item.label === 'Changes' || item.label === 'Missing Orders') {
-                        return canAccessAdminPanel(userRole);
-                    }
-                    if (item.label === 'Admin Control' || item.label === 'Downloads' || item.label === 'Produce' || item.label === 'Mass Messaging') {
-                        return canAccessAdminPanel(userRole);
-                    }
-                    if (item.label === 'AI Builder' || item.label === 'AI Usage' || item.label === 'Data Copilot') {
-                        return canAccessAiTools(userRole);
-                    }
-                    if (item.label === 'Billing' || item.label === 'Invoice') return canAccessBilling(userRole);
-                    if ((item as { role?: string }).role) {
-                        return userRole === (item as { role?: string }).role;
-                    }
-                    return true;
-                }).map((item) => {
-                    const Icon = item.icon;
-                    const base = item.href.split('?')[0]!;
-                    const isActive =
-                        item.href === '/admin'
-                            ? pathname === '/admin' || pathname === '/admin/'
-                            : pathname.startsWith(base);
-                    const isMyHistory = item.label === 'My History' && userRole === 'navigator';
+                {isCollapsed
+                    ? flatVisibleItems.map((item) => renderNavItem(item))
+                    : visibleSections.map((section) => {
+                          const isOpen = openSections.has(section.id);
+                          const sectionHasActive = section.items.some((item) =>
+                              isItemActive(pathname, item.href, allVisibleHrefs),
+                          );
+                          const sectionPanelId = `sidebar-section-${section.id}`;
 
-                    return (
-                        <div key={item.href} style={{ display: 'flex', flexDirection: 'column' }}>
-                            <Link
-                                href={item.href}
-                                className={`${styles.navItem} ${isActive ? styles.active : ''}`}
-                                title={isCollapsed ? item.label : undefined}
-                            >
-                                <Icon size={20} />
-                                {!isCollapsed && <span>{item.label}</span>}
-                            </Link>
-                            {isMyHistory && !isCollapsed && (
-                                <div style={{
-                                    paddingLeft: '3rem',
-                                    paddingRight: 'var(--spacing-md)',
-                                    paddingTop: '1rem',
-                                    paddingBottom: '1rem',
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    gap: '1rem'
-                                }}>
-                                    {isLoadingUnits ? (
-                                        <div style={{
-                                            backgroundColor: '#22c55e',
-                                            borderRadius: '50%',
-                                            width: '80px',
-                                            height: '80px',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            color: 'white',
-                                            fontSize: '0.875rem',
-                                            fontWeight: 600,
-                                            opacity: 0.6
-                                        }}>
-                                            Loading...
-                                        </div>
-                                    ) : (
-                                        <>
-                                            {todayUnits !== null && (
-                                                <div style={{
-                                                    backgroundColor: '#22c55e',
-                                                    borderRadius: '50%',
-                                                    width: '80px',
-                                                    height: '80px',
-                                                    display: 'flex',
-                                                    flexDirection: 'column',
-                                                    alignItems: 'center',
-                                                    justifyContent: 'center',
-                                                    color: 'white',
-                                                    fontSize: '0.875rem',
-                                                    fontWeight: 600,
-                                                    gap: '0.125rem'
-                                                }}>
-                                                    <span style={{ fontSize: '1.5rem', fontWeight: 700 }}>{todayUnits}</span>
-                                                    <span>Today</span>
-                                                </div>
-                                            )}
-                                            {weekUnits !== null && (
-                                                <div style={{
-                                                    backgroundColor: '#22c55e',
-                                                    borderRadius: '50%',
-                                                    width: '80px',
-                                                    height: '80px',
-                                                    display: 'flex',
-                                                    flexDirection: 'column',
-                                                    alignItems: 'center',
-                                                    justifyContent: 'center',
-                                                    color: 'white',
-                                                    fontSize: '0.875rem',
-                                                    fontWeight: 600,
-                                                    gap: '0.125rem'
-                                                }}>
-                                                    <span style={{ fontSize: '1.5rem', fontWeight: 700 }}>{weekUnits}</span>
-                                                    <span>This Week</span>
-                                                </div>
-                                            )}
-                                        </>
-                                    )}
-                                </div>
-                            )}
-                        </div>
-                    );
-                })}
+                          return (
+                              <div key={section.id} className={styles.navSection}>
+                                  <button
+                                      type="button"
+                                      className={`${styles.sectionHeader} ${sectionHasActive ? styles.sectionHeaderActive : ''}`}
+                                      onClick={() => toggleSection(section.id)}
+                                      aria-expanded={isOpen}
+                                      aria-controls={sectionPanelId}
+                                  >
+                                      <span className={styles.sectionLabel}>{section.label}</span>
+                                      <span className={styles.sectionMeta}>
+                                          <span className={styles.sectionCount}>{section.items.length}</span>
+                                          <ChevronDown
+                                              size={14}
+                                              className={`${styles.sectionChevron} ${isOpen ? styles.sectionChevronOpen : ''}`}
+                                              aria-hidden="true"
+                                          />
+                                      </span>
+                                  </button>
+                                  {isOpen ? (
+                                      <div id={sectionPanelId} className={styles.sectionItems}>
+                                          {section.items.map((item) => renderNavItem(item, true))}
+                                      </div>
+                                  ) : null}
+                              </div>
+                          );
+                      })}
             </nav>
 
-            {/* Active Order Summary */}
             {!isCollapsed && <SidebarActiveOrderSummary />}
 
             <div className={styles.footer}>
-                <div
-                    className={`${isCollapsed ? styles.userCollapsed : styles.user} cursor-pointer`}
-                    onClick={() => setIsLogoutVisible(!isLogoutVisible)}
-                    style={{ cursor: 'pointer', position: 'relative' }}
-                >
-                    {!isCollapsed ? userName : (userName[0] || 'A').toUpperCase()}
-
-                    {isLogoutVisible && (
-                        <div style={{
-                            position: 'absolute',
-                            bottom: '100%',
-                            left: '0',
-                            width: '100%',
-                            backgroundColor: 'var(--bg-panel)',
-                            border: '1px solid var(--border-color)',
-                            borderRadius: '0.375rem',
-                            padding: '0.5rem',
-                            marginBottom: '0.5rem',
-                            zIndex: 50,
-                            minWidth: isCollapsed ? 'max-content' : 'auto',
-                            boxShadow: 'var(--shadow-md)'
-                        }}>
-                            <button
-                                onClick={() => logout()}
-                                style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '0.5rem',
-                                    width: '100%',
-                                    color: 'var(--color-danger)',
-                                    background: 'none',
-                                    border: 'none',
-                                    cursor: 'pointer',
-                                    fontSize: '0.875rem',
-                                    padding: '0.25rem'
-                                }}
-                            >
-                                <LogOut size={16} />
-                                <span>Log Out</span>
-                            </button>
+                {!isCollapsed ? (
+                    <>
+                        <div className={styles.userCard}>
+                            <div className={styles.userInfo}>
+                                <div className={styles.userName}>{userName}</div>
+                                <div className={styles.userRole}>{userRole}</div>
+                            </div>
                         </div>
-                    )}
-                </div>
+                        <button type="button" onClick={() => logout()} className={styles.signOutBtn}>
+                            Sign out
+                        </button>
+                    </>
+                ) : (
+                    <div className={styles.userCollapsed} title={userName}>
+                        {(userName[0] || 'A').toUpperCase()}
+                    </div>
+                )}
             </div>
         </aside>
     );

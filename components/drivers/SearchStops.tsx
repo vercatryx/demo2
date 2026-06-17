@@ -141,8 +141,8 @@ export default function SearchStops({ allStops = [], drivers = [], themeColor = 
           .sub{display:flex;align-items:center;gap:6px;color:#6b7280;font-size:13px;margin-top:4px}
           .meta{display:flex;align-items:center;gap:8px;margin-top:6px}
           .chip{border:1px solid #e5e7eb;border-radius:999px;font-size:12px;padding:2px 8px;background:#f8fafc}
-          .chip.chip-ok{background:#ecfdf5;border-color:#10b981;color:#059669}
-          .done{color:#16a34a;font-weight:600}
+          .chip.chip-ok{background:#eff6ff;border-color:#2563eb;color:#2563eb}
+          .done{color:#2563eb;font-weight:600}
           .muted-small{color:#6b7280;font-size:12px}
           .actions{display:flex;align-items:center;gap:8px;flex-shrink:0}
           .btn{border:1px solid #111;background:#111;color:#fff;border-radius:10px;padding:8px 10px;cursor:pointer}

@@ -12,7 +12,7 @@
 .table { width: 100%; border-collapse: collapse; }
 .th { text-align: left; padding: var(--spacing-md, 1rem) var(--spacing-lg, 1.5rem); background: var(--bg-surface-hover, #f0f0f0); color: var(--text-secondary, #555); font-weight: 600; font-size: 0.875rem; }
 .td { padding: var(--spacing-md, 1rem) var(--spacing-lg, 1.5rem); border-top: 1px solid var(--border-color, #ddd); font-size: 0.9375rem; }
-.statusPaid { color: var(--color-success, #16a34a); font-weight: 600; }
+.statusPaid { color: var(--color-success); font-weight: 600; }
 .statusUnpaid { color: var(--color-danger, #dc2626); font-weight: 600; }
 .statusPending { color: var(--color-warning, #d97706); font-weight: 600; }
 .backBtn { background: none; border: none; display: flex; align-items: center; gap: 0.5rem; color: var(--text-secondary, #555); cursor: pointer; font-size: 0.9rem; margin-bottom: var(--spacing-lg, 1.5rem); }

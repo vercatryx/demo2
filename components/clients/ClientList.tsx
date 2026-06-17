@@ -2412,14 +2412,14 @@ export function ClientList({ currentUser }: ClientListProps = {}) {
             },
             waiting_approval: {
                 label: 'Pending',
-                color: '#48be85',
-                bgColor: 'rgba(72, 190, 133, 0.1)',
+                color: 'var(--color-brand-600)',
+                bgColor: 'rgba(37, 99, 235, 0.1)',
                 icon: <CheckSquare size={14} />
             },
             approved: {
                 label: 'Approved',
                 color: 'var(--color-success)',
-                bgColor: 'rgba(34, 197, 94, 0.1)',
+                bgColor: 'rgba(37, 99, 235, 0.1)',
                 icon: <CheckSquare size={14} />
             },
             rejected: {

@@ -16,40 +16,42 @@
 }
 
 .title {
-    font-size: 1.875rem;
-    font-weight: 700;
+    font-size: 1.5rem;
+    font-weight: 600;
+    letter-spacing: -0.025em;
     color: var(--text-primary);
 }
 
 .viewToggle {
-    display: flex;
-    background-color: var(--bg-surface);
+    display: inline-flex;
+    padding: 0.125rem;
+    background: var(--bg-surface-hover);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
-    padding: 2px;
+    gap: 0.125rem;
 }
 
 .viewBtn {
-    background: none;
+    padding: 0.375rem 0.75rem;
     border: none;
-    padding: 6px 12px;
-    border-radius: var(--radius-sm);
+    border-radius: calc(var(--radius-md) - 2px);
+    background: transparent;
     color: var(--text-secondary);
     font-size: 0.875rem;
-    cursor: pointer;
     font-weight: 500;
-    transition: all 0.2s;
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.viewBtn:hover {
+.viewBtn:hover:not(.viewBtnActive) {
     color: var(--text-primary);
 }
 
 .viewBtnActive {
-    background-color: var(--color-primary);
-    color: #000000;
+    background: var(--bg-surface);
+    color: var(--color-brand-700);
     box-shadow: var(--shadow-sm);
-    font-weight: 600;
+    font-weight: 500;
 }
 
 .filters {
@@ -370,8 +372,8 @@
     align-items: center;
     gap: 8px;
     font-size: 0.85rem;
-    color: #14532d;
-    background-color: rgba(72, 190, 133, 0.2);
+    color: #1d4ed8;
+    background-color: rgba(37, 99, 235, 0.2);
     padding: 4px 10px;
     border-radius: var(--radius-sm);
     animation: fadeIn 0.3s ease-out;
@@ -419,12 +421,12 @@
 }
 
 .sortButtonActive {
-    color: #14532d;
-    background-color: rgba(72, 190, 133, 0.35);
+    color: #1d4ed8;
+    background-color: rgba(37, 99, 235, 0.35);
 }
 
 .sortButtonActive:hover {
-    background-color: rgba(72, 190, 133, 0.5);
+    background-color: rgba(37, 99, 235, 0.5);
 }
 
 .filterDropdown {
@@ -451,12 +453,12 @@
 }
 
 .filterButtonActive {
-    color: #14532d;
-    background-color: rgba(72, 190, 133, 0.35);
+    color: #1d4ed8;
+    background-color: rgba(37, 99, 235, 0.35);
 }
 
 .filterButtonActive:hover {
-    background-color: rgba(72, 190, 133, 0.5);
+    background-color: rgba(37, 99, 235, 0.5);
 }
 
 .filterMenu {
@@ -495,13 +497,13 @@
 }
 
 .filterOptionActive {
-    background-color: rgba(72, 190, 133, 0.2);
-    color: #14532d;
+    background-color: rgba(37, 99, 235, 0.2);
+    color: #1d4ed8;
     font-weight: 600;
 }
 
 .filterOptionActive:hover {
-    background-color: rgba(72, 190, 133, 0.3);
+    background-color: rgba(37, 99, 235, 0.3);
 }
 
 .clearButton {

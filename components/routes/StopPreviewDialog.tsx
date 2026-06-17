@@ -242,7 +242,7 @@ export default function StopPreviewDialog({ open, onClose, stop, boxTypes: propB
             case 'billing_pending':
                 return '#8b5cf6';
             case 'completed':
-                return '#16a34a';
+                return '#2563eb';
             case 'pending':
             case 'scheduled':
             case 'confirmed':
@@ -483,7 +483,7 @@ export default function StopPreviewDialog({ open, onClose, stop, boxTypes: propB
                                                     <Typography variant="body2" sx={{ color: '#6b7280' }}>
                                                         Completed:
                                                     </Typography>
-                                                    <Typography variant="body2" sx={{ fontWeight: 500, color: '#16a34a' }}>
+                                                    <Typography variant="body2" sx={{ fontWeight: 500, color: '#2563eb' }}>
                                                         {driverDetails.completedStops} / {driverDetails.totalStops}
                                                     </Typography>
                                                 </Box>

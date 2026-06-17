@@ -1,449 +1,626 @@
 .sidebar {
-    width: 280px;
-    background-color: var(--bg-surface);
-    border-right: 1px solid var(--border-color);
-    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.02);
-    display: flex;
-    flex-direction: column;
-    height: 100vh;
-    position: fixed;
-    left: 0;
-    top: 0;
-    transition: width 0.3s ease;
-    z-index: 50;
-    overflow-x: hidden;
-    /* Hide content when collapsing */
+  width: var(--sidebar-width);
+  background-color: var(--bg-surface);
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  position: fixed;
+  left: 0;
+  top: 0;
+  transition: width 0.25s cubic-bezier(0.2, 0, 0, 1);
+  z-index: 50;
+  overflow-x: hidden;
 }
 
 .collapsed {
-    width: 80px;
+  width: var(--sidebar-collapsed-width);
 }
 
 .header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: var(--spacing-md) var(--spacing-lg);
-    border-bottom: 1px solid var(--border-color);
-    min-height: 72px;
-    max-height: 88px;
-    position: relative;
-    gap: var(--spacing-sm);
-    overflow: hidden;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 1.25rem 1.25rem 1rem;
+  min-height: auto;
+  position: relative;
+  gap: var(--spacing-sm);
 }
 
 .logo {
-    display: flex;
-    align-items: center;
-    justify-content: flex-start;
-    flex: 1;
-    min-width: 0;
-    max-width: calc(100% - 44px);
-    overflow: hidden;
-}
-
-.logoImage {
-    width: auto;
-    height: auto;
-    max-width: 100%;
-    max-height: 52px;
-    object-fit: contain;
-    object-position: left center;
+  flex: 1;
+  min-width: 0;
+  max-width: calc(100% - 36px);
 }
 
 .logoCollapsed {
-    width: 100%;
-    max-width: 56px;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    color: var(--color-primary);
-    overflow: hidden;
-}
-
-.logoImageCollapsed {
-    width: 40px;
-    height: 40px;
-    max-width: 100%;
-    max-height: 40px;
-    object-fit: contain;
-}
-
-.logoIcon {
-    color: var(--color-primary);
-    min-width: 28px;
-    /* Stop icon shrinking */
+  flex: 1;
+  min-width: 0;
 }
 
 .toggleBtn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: transparent;
-    border: 1px solid var(--border-color);
-    color: var(--text-secondary);
-    border-radius: var(--radius-sm);
-    width: 24px;
-    height: 24px;
-    cursor: pointer;
-    transition: all 0.2s;
-    flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  border-radius: var(--radius-md);
+  width: 2.25rem;
+  height: 2.25rem;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+  flex-shrink: 0;
+  box-shadow: var(--shadow-sm);
+}
+
+.toggleBtn:hover {
+  background: var(--bg-surface-hover);
+  color: var(--text-primary);
+}
+
+.collapsed .header {
+  padding: 0.75rem 0.5rem;
+  flex-direction: column;
+  gap: 0.75rem;
+  align-items: center;
 }
 
 .collapsed .toggleBtn {
-    right: 50%;
-    transform: translateX(50%);
-    top: 80px;
-    /* Move below header in collapsed mode if desired, but sticking to header is better. */
-    /* Actually let's keep it in the header for now, maybe covering the logo or just below it? 
-       To keep it simple, let's put it in the header. */
-    position: static;
-    margin: 0 auto;
-    border: none;
-    width: 100%;
-    height: 100%;
-
-}
-
-/* Wait, the design for the toggle button in collapsed mode needs to be usable. 
-   If I put it inside the header div which has flex, it should be fine.
-*/
-
-.collapsed .header {
-    padding: var(--spacing-md);
-    flex-direction: column;
-    gap: 1rem;
-    justify-content: center;
-    height: auto;
+  width: 100%;
+  border: none;
+  box-shadow: none;
+  background: transparent;
 }
 
 .nav {
-    flex: 1;
-    padding: var(--spacing-md);
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-xs);
+  flex: 1;
+  padding: 0 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  overflow-y: auto;
+}
+
+.navSection {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.4375rem 0.625rem;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.sectionHeader:hover {
+  background: var(--bg-surface-hover);
+  color: var(--text-secondary);
+}
+
+.sectionHeaderActive {
+  color: var(--color-brand-700);
+}
+
+.sectionLabel {
+  min-width: 0;
+  text-align: left;
+}
+
+.sectionMeta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+.sectionCount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.125rem;
+  height: 1.125rem;
+  padding: 0 0.25rem;
+  border-radius: var(--radius-full);
+  background: var(--bg-surface-hover);
+  color: var(--text-muted);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.sectionHeaderActive .sectionCount {
+  background: var(--color-brand-50);
+  color: var(--color-brand-700);
+}
+
+.sectionChevron {
+  color: var(--text-muted);
+  transition: transform 0.15s ease;
+}
+
+.sectionChevronOpen {
+  transform: rotate(180deg);
+}
+
+.sectionItems {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  padding-left: 0.375rem;
+  margin-bottom: 0.125rem;
+}
+
+.navItemNested {
+  padding-left: 0.625rem;
+}
+
+.navIcon {
+  flex-shrink: 0;
+  width: 1.125rem;
+  height: 1.125rem;
+  color: var(--text-muted);
+  transition: color 0.15s ease;
+}
+
+.navLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .navItem {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-md);
-    padding: var(--spacing-sm) var(--spacing-md);
-    color: var(--text-secondary);
-    border-radius: var(--radius-md);
-    transition: all 0.2s ease;
-    font-weight: 600;
-    white-space: nowrap;
-    overflow: hidden;
-    height: 52px;
-    font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.5rem 0.75rem;
+  color: #334155;
+  border-radius: var(--radius-md);
+  transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  font-size: 0.875rem;
+  border: none;
+  box-shadow: none;
 }
 
 .collapsed .navItem {
-    justify-content: center;
-    padding: var(--spacing-sm);
+  justify-content: center;
+  padding: 0.5rem;
 }
 
 .navItem:hover {
-    background-color: var(--bg-surface-hover);
-    color: var(--text-primary);
+  background-color: var(--bg-surface-hover);
+  color: var(--text-primary);
+}
+
+.navItem:hover .navIcon {
+  color: var(--text-secondary);
 }
 
 .active {
-    background-color: #dcfce7;
-    border-left: 4px solid var(--color-brand);
-    color: var(--text-primary);
+  background-color: var(--color-brand-50);
+  color: var(--color-brand-700);
+  box-shadow: var(--shadow-sm), inset 0 0 0 1px var(--color-brand-100);
+}
+
+.active .navIcon {
+  color: var(--color-brand-600);
+}
+
+.navItemWrapper {
+  display: flex;
+  flex-direction: column;
+}
+
+.navigatorStats {
+  margin: 0.25rem 0.75rem 0.5rem 2.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.statBadge {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background: var(--bg-muted);
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+}
+
+.statValue {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #1e293b;
+  line-height: 1;
+}
+
+.statLoading {
+  opacity: 0.7;
 }
 
 .footer {
-    padding: var(--spacing-md);
-    border-top: 1px solid var(--border-color);
-    white-space: nowrap;
-    /* overflow: hidden; Removed to allow popup */
-    height: 60px;
-    /* Fix height */
-    display: flex;
-    align-items: center;
-    position: relative;
-    /* Ensure it's a positioning context if needed, though the child handles it */
+  padding: 0.75rem;
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
 .collapsed .footer {
-    justify-content: center;
-    padding: var(--spacing-md) 0;
+  align-items: center;
+  padding: 0.75rem 0.5rem;
 }
 
-.user {
-    font-size: 0.875rem;
-    color: var(--text-tertiary);
+.userCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background: var(--bg-muted);
+}
+
+.userInfo {
+  min-width: 0;
+  flex: 1;
+}
+
+.userName {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.userRole {
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+  text-transform: capitalize;
 }
 
 .userCollapsed {
-    font-size: 0.75rem;
-    font-weight: 700;
-    color: var(--text-tertiary);
-    text-align: center;
-    width: 100%;
-    background-color: var(--bg-surface-hover);
-    border-radius: 50%;
-    width: 32px;
-    height: 32px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--bg-surface-hover);
+  border-radius: 50%;
+  border: 1px solid var(--border-color);
+  cursor: pointer;
+  position: relative;
 }
 
-/* Active Order Summary Styles */
+.logoutMenu {
+  position: absolute;
+  bottom: calc(100% + 0.5rem);
+  left: 0;
+  right: 0;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 0.375rem;
+  z-index: 50;
+  box-shadow: var(--shadow-popover);
+  animation: popoverIn 140ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.logoutBtn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  color: var(--color-danger);
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  padding: 0.5rem 0.625rem;
+  border-radius: var(--radius-sm);
+  transition: background-color 0.15s ease;
+}
+
+.logoutBtn:hover {
+  background: var(--color-danger-soft);
+}
+
+.signOutBtn {
+  width: 100%;
+  padding: 0.375rem 0.625rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.signOutBtn:hover {
+  background: var(--bg-surface-hover);
+  color: var(--text-primary);
+}
+
 .orderSummaryContainer {
-    margin: var(--spacing-md);
-    padding: var(--spacing-md);
-    background-color: var(--bg-panel);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-sm);
+  margin: 0 0.75rem 0.75rem;
+  padding: 0.75rem;
+  background-color: var(--bg-muted);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
 }
 
 .collapsed .orderSummaryContainer {
-    display: none;
+  display: none;
 }
 
 .orderSummaryHeader {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: var(--spacing-xs);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--spacing-xs);
 }
 
 .orderSummaryTitle {
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: var(--text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin: 0;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0;
 }
 
 .orderSummaryContent {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-xs);
-    font-size: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  font-size: 0.8125rem;
 }
 
 .orderSummaryEmpty {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-xs);
-    color: var(--text-tertiary);
-    font-style: italic;
-    font-size: 0.8rem;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  color: var(--text-tertiary);
+  font-style: italic;
+  font-size: 0.8125rem;
 }
 
 .orderSummaryFood,
 .orderSummaryBoxes {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-xs);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
 }
 
 .orderSummaryServiceType {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-xs);
-    font-weight: 600;
-    color: var(--color-primary);
-    font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  font-weight: 600;
+  color: #1e293b;
+  font-size: 0.875rem;
 }
 
 .orderSummaryDetails {
-    color: var(--text-primary);
-    font-size: 0.85rem;
-    line-height: 1.4;
+  color: var(--text-primary);
+  font-size: 0.8125rem;
+  line-height: 1.4;
 }
 
 .orderSummaryLimit {
-    font-size: 0.75rem;
-    color: var(--text-secondary);
-    font-style: italic;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  font-style: italic;
 }
 
 .orderSummaryItems {
-    font-size: 0.8rem;
-    color: var(--text-secondary);
-    margin-top: var(--spacing-xs);
-    padding-left: var(--spacing-sm);
-    border-left: 2px solid var(--border-color);
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  margin-top: var(--spacing-xs);
+  padding-left: var(--spacing-sm);
+  border-left: 2px solid var(--border-color);
 }
 
 .orderSummaryDays {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-sm);
-    margin-top: var(--spacing-xs);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-xs);
 }
 
 .orderSummaryDay {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-xs);
-    padding: var(--spacing-sm);
-    background-color: var(--bg-surface);
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-sm);
+  background-color: var(--bg-surface);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color-light);
 }
 
 .orderSummaryDayHeader {
-    font-size: 0.85rem;
-    font-weight: 600;
-    color: var(--color-primary);
-    margin-bottom: 2px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #1e293b;
+  margin-bottom: 2px;
 }
 
 .orderSummaryDayVendors {
-    font-size: 0.8rem;
-    color: var(--text-primary);
-    line-height: 1.4;
+  font-size: 0.8125rem;
+  color: var(--text-primary);
+  line-height: 1.4;
 }
 
 .orderSummaryDayItems {
-    font-size: 0.75rem;
-    color: var(--text-secondary);
-    padding-left: var(--spacing-sm);
-    border-left: 2px solid var(--border-color);
-    margin-top: 2px;
-    line-height: 1.4;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  padding-left: var(--spacing-sm);
+  border-left: 2px solid var(--border-color);
+  margin-top: 2px;
+  line-height: 1.4;
 }
 
 .orderSummaryDayBox {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    margin-top: var(--spacing-xs);
-    padding: var(--spacing-xs);
-    background-color: var(--bg-panel);
-    border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: var(--spacing-xs);
+  padding: var(--spacing-xs);
+  background-color: var(--bg-muted);
+  border-radius: var(--radius-sm);
 }
 
 .orderSummaryDayBoxType {
-    font-size: 0.8rem;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 2px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 2px;
 }
 
 .orderSummaryLoading {
-    color: var(--text-tertiary);
-    font-size: 0.8rem;
-    text-align: center;
-    padding: var(--spacing-sm);
+  color: var(--text-tertiary);
+  font-size: 0.8125rem;
+  text-align: center;
+  padding: var(--spacing-sm);
 }
 
-/* Client Info block (address, unit, phone, email, Unite Us link) */
 .orderSummaryClientInfo {
-    margin-bottom: var(--spacing-sm);
-    padding-bottom: var(--spacing-sm);
-    border-bottom: 1px solid var(--border-color);
+  margin-bottom: var(--spacing-sm);
+  padding-bottom: var(--spacing-sm);
+  border-bottom: 1px solid var(--border-color);
 }
 
 .orderSummaryInfoRow {
-    display: flex;
-    align-items: flex-start;
-    gap: var(--spacing-xs);
-    font-size: 0.8rem;
-    color: var(--text-secondary);
-    line-height: 1.4;
-    margin-bottom: 4px;
-    word-break: break-word;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-xs);
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  margin-bottom: 4px;
+  word-break: break-word;
 }
 
 .orderSummaryInfoRow:last-child {
-    margin-bottom: 0;
+  margin-bottom: 0;
 }
 
 .orderSummaryInfoIcon {
-    flex-shrink: 0;
-    margin-top: 2px;
-    color: var(--text-tertiary);
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--text-tertiary);
 }
 
 .orderSummaryLink {
-    color: var(--color-primary);
-    text-decoration: none;
+  color: var(--color-brand-600);
+  text-decoration: none;
 }
 
 .orderSummaryLink:hover {
-    text-decoration: underline;
+  text-decoration: underline;
 }
 
 .orderSummaryNotes {
-    font-style: italic;
-    color: var(--text-tertiary);
+  font-style: italic;
+  color: var(--text-tertiary);
 }
 
 .orderSummaryFlags {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 4px;
-    margin-top: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
 }
 
 .orderSummaryFlagLabel {
-    font-size: 0.7rem;
-    color: var(--text-tertiary);
-    margin-right: 2px;
+  font-size: 0.6875rem;
+  color: var(--text-tertiary);
+  margin-right: 2px;
 }
 
 .orderSummaryFlag {
-    font-size: 0.65rem;
-    padding: 2px 6px;
-    border-radius: 4px;
-    background: var(--bg-surface-hover);
-    color: var(--text-secondary);
+  font-size: 0.625rem;
+  padding: 2px 6px;
+  border-radius: var(--radius-full);
+  background: var(--bg-surface-hover);
+  color: var(--text-secondary);
+  box-shadow: inset 0 0 0 1px var(--border-color);
 }
 
 .orderSummaryGeocode {
-    margin-top: 8px;
-    padding-top: 8px;
-    border-top: 1px solid var(--border-color);
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .orderSummaryGeocodeOk {
-    font-size: 0.75rem;
-    color: var(--text-tertiary);
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
 }
 
 .orderSummaryGeocodeBtn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 0.75rem;
-    padding: 4px 8px;
-    background: var(--bg-surface-hover);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    color: var(--text-secondary);
-    cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  padding: 4px 8px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 
 .orderSummaryGeocodeBtn:hover:not(:disabled) {
-    background: var(--color-primary);
-    color: white;
-    border-color: var(--color-primary);
+  background: var(--color-brand-600);
+  color: white;
+  border-color: var(--color-brand-600);
 }
 
 .orderSummaryGeocodeBtn:disabled {
-    opacity: 0.7;
-    cursor: not-allowed;
+  opacity: 0.7;
+  cursor: not-allowed;
 }
 
 .orderSummaryGeoErr {
-    font-size: 0.7rem;
-    color: var(--color-danger, #dc2626);
+  font-size: 0.6875rem;
+  color: var(--color-danger);
 }

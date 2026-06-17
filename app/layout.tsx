@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
 import { Suspense } from 'react';
 import './globals.css';
 import { LayoutShell } from '@/components/LayoutShell';
@@ -25,7 +24,6 @@ function PageFallback() {
   );
 }
 
-const inter = Inter({ subsets: ['latin'], display: 'swap' });
 
 export const metadata: Metadata = {
   title: {
@@ -62,7 +60,7 @@ export default async function RootLayout({
 
   return (
     <html lang="en">
-      <body className={inter.className}>
+      <body>
         <ErrorBoundary>
           <MuiThemeProvider>
             <TimeProvider initialFakeTime={initialFakeTime}>

@@ -33,7 +33,7 @@ export default function SubmissionsList({ submissions }: SubmissionsListProps) {
 
     const getStatusColor = (status: string) => {
         switch (status) {
-            case 'accepted': return '#10b981';
+            case 'accepted': return '#2563eb';
             case 'rejected': return '#ef4444';
             case 'pending': return '#f59e0b';
             default: return '#6b7280';
@@ -63,7 +63,7 @@ export default function SubmissionsList({ submissions }: SubmissionsListProps) {
                 >
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', marginBottom: submission.comments ? '12px' : '0' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1 }}>
-                            {submission.status === 'accepted' && <CheckCircle size={20} color="#10b981" />}
+                            {submission.status === 'accepted' && <CheckCircle size={20} color="#2563eb" />}
                             {submission.status === 'rejected' && <XCircle size={20} color="#ef4444" />}
                             {submission.status === 'pending' && <Clock size={20} color="#f59e0b" />}
 

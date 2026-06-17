@@ -3,7 +3,6 @@
 import { forwardRef } from 'react';
 import type { ClientInvoiceApiPayload } from '@/lib/invoice/build-client-invoice-payload';
 import { formatInvoiceMoney, getClientInvoiceFixedLine } from '@/lib/invoice/build-client-invoice-payload';
-import { APP_BRAND_NAME, APP_LOGO_PATH } from '@/lib/brand';
 import {
     INVOICE_ORG_ADDRESS_INLINE,
     INVOICE_ORG_SUPPORT,
@@ -40,10 +39,6 @@ export const InvoiceReceipt = forwardRef<HTMLDivElement, Props>(function Invoice
                 <article className={styles.receipt}>
                     <header className={styles.receiptHeader}>
                         <div className={styles.headerTop}>
-                            <div className={styles.brand}>
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img src={APP_LOGO_PATH} alt={APP_BRAND_NAME} className={styles.logo} />
-                            </div>
                             <div className={styles.headerTitles}>
                                 <h1 className={styles.docTitle}>Invoice</h1>
                             </div>

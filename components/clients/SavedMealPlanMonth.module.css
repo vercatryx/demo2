@@ -90,15 +90,15 @@
 .dateBtn:hover {
   background: var(--bg-surface-hover);
   border-color: var(--color-primary);
-  box-shadow: 0 2px 8px rgba(72, 190, 133, 0.15);
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.15);
   transform: translateY(-1px);
 }
 
 .dateBtn.active {
-  background: rgba(var(--color-primary-rgb, 72, 190, 133), 0.14);
+  background: rgba(var(--color-primary-rgb, 37, 99, 235), 0.14);
   border-color: var(--color-primary);
   color: var(--color-primary);
-  box-shadow: 0 0 0 2px rgba(var(--color-primary-rgb, 72, 190, 133), 0.25);
+  box-shadow: 0 0 0 2px rgba(var(--color-primary-rgb, 37, 99, 235), 0.25);
 }
 
 .dateLabel {
@@ -150,7 +150,7 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--color-primary);
-  background: rgba(var(--color-primary-rgb, 72, 190, 133), 0.12);
+  background: rgba(var(--color-primary-rgb, 37, 99, 235), 0.12);
   padding: 2px 8px;
   border-radius: 999px;
   margin-left: 0.25rem;
@@ -641,19 +641,19 @@
 }
 
 .calendarDayHasPlan {
-  background: rgba(34, 197, 94, 0.1);
-  border-color: rgba(34, 197, 94, 0.3);
+  background: rgba(37, 99, 235, 0.1);
+  border-color: rgba(37, 99, 235, 0.3);
 }
 
 .calendarDayHasPlan .calendarDayNum {
-  color: var(--color-success, #16a34a);
+  color: var(--color-success);
   font-weight: 600;
 }
 
 .calendarDayHasPlan:hover {
-  background: rgba(34, 197, 94, 0.15);
-  border-color: rgba(34, 197, 94, 0.5);
-  box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.4);
+  background: rgba(37, 99, 235, 0.15);
+  border-color: rgba(37, 99, 235, 0.5);
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.4);
 }
 
 /* Center the calendar in client portal */
@@ -677,7 +677,7 @@
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: var(--color-success, #22c55e);
+  background: var(--color-success);
   color: white;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
 }
@@ -690,7 +690,7 @@
 .calendarDayIndicator {
   font-size: 0.6rem;
   font-weight: 600;
-  color: var(--color-success, #16a34a);
+  color: var(--color-success);
   line-height: 1;
   white-space: nowrap;
   max-width: 100%;
@@ -723,7 +723,7 @@
 }
 
 .calendarDayToday.calendarDayHasPlan {
-  background: rgba(34, 197, 94, 0.12);
+  background: rgba(37, 99, 235, 0.12);
   border-color: var(--color-primary);
   box-shadow: 0 0 0 2px rgba(var(--color-primary-rgb, 59, 130, 246), 0.2);
 }
@@ -748,5 +748,5 @@
 
 .calendarLegendItem svg {
   flex-shrink: 0;
-  color: var(--color-success, #22c55e);
+  color: var(--color-success);
 }

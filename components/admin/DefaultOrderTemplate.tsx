@@ -976,7 +976,7 @@ export function DefaultOrderTemplate({ mainVendor, menuItems, onMenuItemsChange 
                     padding: 'var(--spacing-sm) var(--spacing-md)',
                     marginBottom: 'var(--spacing-md)',
                     borderRadius: 'var(--radius-sm)',
-                    backgroundColor: message.includes('Error') ? 'rgba(239, 68, 68, 0.1)' : 'rgba(34, 197, 94, 0.1)',
+                    backgroundColor: message.includes('Error') ? 'rgba(239, 68, 68, 0.1)' : 'rgba(37, 99, 235, 0.1)',
                     color: message.includes('Error') ? 'var(--color-danger)' : 'var(--color-success)'
                 }}>
                     {message}

@@ -9,7 +9,7 @@
     --primary: #0d9488;
     --primary-hover: #0f766e;
     --primary-muted: rgba(13, 148, 136, 0.12);
-    --success: #059669;
+    --success: #2563eb;
     --success-muted: rgba(5, 150, 105, 0.12);
     --danger: #dc2626;
     --danger-muted: rgba(220, 38, 38, 0.1);
@@ -294,13 +294,13 @@ body {
 }
 
 .slot-stage--billing {
-    background: #d1fae5;
-    color: #065f46;
+    background: #eff6ff;
+    color: #1d4ed8;
 }
 
 .slot-stage--success {
     background: var(--success-muted);
-    color: #047857;
+    color: #1d4ed8;
 }
 
 .slot-stage--skipped {
@@ -562,7 +562,7 @@ tr.row-selected .queue-client-cell {
 
 .status-success {
     background: var(--success-muted);
-    color: #047857;
+    color: #1d4ed8;
 }
 
 .status-failed {

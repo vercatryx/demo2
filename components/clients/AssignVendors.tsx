@@ -499,7 +499,7 @@ export function AssignVendors({ currentUser }: AssignVendorsProps = {}) {
                 <div style={{
                     padding: '10px 16px',
                     borderRadius: 'var(--radius-md)',
-                    backgroundColor: assignResult.failed === 0 ? 'rgba(34, 197, 94, 0.1)' : 'rgba(234, 179, 8, 0.1)',
+                    backgroundColor: assignResult.failed === 0 ? 'rgba(37, 99, 235, 0.1)' : 'rgba(234, 179, 8, 0.1)',
                     border: `1px solid ${assignResult.failed === 0 ? 'var(--color-success)' : '#eab308'}`,
                     color: assignResult.failed === 0 ? 'var(--color-success)' : '#eab308',
                     marginBottom: '12px',
@@ -619,7 +619,7 @@ export function AssignVendors({ currentUser }: AssignVendorsProps = {}) {
                                     </span>
                                 </span>
                                 <span style={{ minWidth: '120px', flex: 1, paddingRight: '16px' }}>
-                                    <span className={`badge ${client.serviceType === 'Boxes' ? 'badge-blue' : client.serviceType === 'Food' ? 'badge-green' : 'badge-purple'}`}>
+                                    <span className={`badge ${client.serviceType === 'Boxes' ? 'badge-blue' : client.serviceType === 'Food' ? 'badge-brand' : 'badge-purple'}`}>
                                         {client.serviceType || '-'}
                                     </span>
                                 </span>

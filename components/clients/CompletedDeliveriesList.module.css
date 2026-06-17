@@ -14,7 +14,7 @@
 .row:last-child { border-bottom: none; }
 .proofLink { display: inline-flex; align-items: center; gap: 6px; color: var(--color-primary, #2563eb); text-decoration: none; font-size: 0.875rem; }
 .proofLink:hover { text-decoration: underline; }
-.statusCompleted { color: var(--color-success, #16a34a); font-weight: 600; }
+.statusCompleted { color: var(--color-success); font-weight: 600; }
 .statusBillingPending { color: var(--color-warning, #d97706); font-weight: 500; }
 .statusOther { color: var(--text-secondary, #555); }
 .empty { padding: var(--spacing-xl, 2rem); text-align: center; color: var(--text-tertiary, #888); }

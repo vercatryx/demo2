@@ -2,31 +2,24 @@
 
 import { useState } from 'react';
 import { Sidebar } from './Sidebar';
-
 import { usePathname } from 'next/navigation';
 import { DataCacheProvider } from '@/lib/data-cache';
+import styles from './LayoutShell.module.css';
+import clsx from 'clsx';
 
 export function LayoutShell({ children, userName, userRole, userId }: { children: React.ReactNode, userName?: string, userRole?: string, userId?: string }) {
     const [isCollapsed, setIsCollapsed] = useState(false);
     const pathname = usePathname();
 
-    if (pathname === '/login') {
+    if (pathname === '/login' || pathname.startsWith('/login/')) {
         return <>{children}</>;
     }
 
-    // Public/solo pages: no sidebar, full-width content
     const isVendorsProduce = pathname === '/vendors/produce' || pathname.startsWith('/vendors/produce/');
     if (isVendorsProduce) {
         return <>{children}</>;
     }
 
-    // Width constants
-    const SIDEBAR_WIDTH = 260;
-    const SIDEBAR_COLLAPSED_WIDTH = 80;
-    const currentSidebarWidth = isCollapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_WIDTH;
-
-    // Hide sidebar only for vendor portal (singular /vendor), not admin vendor management (plural /vendors)
-    // Hide sidebar only for vendor portal (singular /vendor), client portal, verify-order, delivery, drivers, and produce routes
     const isVendorPortal = pathname === '/vendor' || pathname.startsWith('/vendor/');
     const isClientPortal =
         pathname.startsWith('/client-portal') ||
@@ -39,12 +32,21 @@ export function LayoutShell({ children, userName, userRole, userId }: { children
     const isRoutes = pathname === '/routes' || pathname.startsWith('/routes/');
     const showSidebar = !isVendorPortal && !isClientPortal && !isVerifyOrder && !isDelivery && !isDrivers && !isProduce;
 
-    // Adjust padding for routes page: remove top and right padding; client portals are full-bleed
-    const mainPadding = isRoutes ? '0 0 0 20px' : isClientPortal ? '0' : '2rem 20px 0 20px';
+    const mainClassName = clsx(
+        styles.main,
+        showSidebar && (isCollapsed ? styles.mainWithSidebarCollapsed : styles.mainWithSidebar),
+        !showSidebar && styles.mainFullBleed,
+    );
+
+    const contentClassName = clsx(
+        'page-content',
+        isRoutes && 'page-content--routes',
+        isClientPortal && 'page-content--flush',
+    );
 
     return (
         <DataCacheProvider>
-            <div style={{ display: 'flex', minHeight: '100vh' }}>
+            <div className={styles.shell}>
                 {showSidebar && (
                     <Sidebar
                         isCollapsed={isCollapsed}
@@ -55,22 +57,10 @@ export function LayoutShell({ children, userName, userRole, userId }: { children
                     />
                 )}
 
-                <main style={{
-                    flex: 1,
-                    marginLeft: `${showSidebar ? currentSidebarWidth : 0}px`,
-                    padding: mainPadding,
-                    backgroundColor: 'var(--bg-app)',
-                    transition: 'margin-left 0.3s ease',
-                    // Fix horizontal scroll: ensure main container clips overflow
-                    // but allows vertical scroll.
-                    // However, we want the PAGE to scroll vertically, so we just need
-                    // to prevent horizontal overflow spilling out of this container.
-                    overflowX: 'hidden',
-                    minWidth: 0, // Critical for flex children to shrink below content size
-                    display: 'flex',
-                    flexDirection: 'column'
-                }}>
-                    {children}
+                <main className={mainClassName}>
+                    <div className={contentClassName}>
+                        {children}
+                    </div>
                 </main>
             </div>
         </DataCacheProvider>

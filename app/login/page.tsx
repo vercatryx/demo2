@@ -1,7 +1,6 @@
 'use client';
 
 import { useActionState, useState } from 'react';
-import Image from 'next/image';
 import {
     login,
     checkLoginIdentity,
@@ -10,7 +9,6 @@ import {
     confirmLoginWithPick,
     type LoginAccountChoice,
 } from '@/lib/auth-actions';
-import { APP_LOGO_PATH } from '@/lib/brand';
 import styles from './page.module.css';
 
 type Step = 1 | 2 | 3;
@@ -193,241 +191,213 @@ export default function LoginPage() {
         setPickError('');
     };
 
-    const title =
-        step === 1 ? 'Welcome Back' : step === 2 ? (useOtp ? 'Enter Code' : 'Welcome Back') : 'Choose account';
+    const heroTitle =
+        step === 1
+            ? 'Welcome to Client Food Service'
+            : step === 2
+              ? useOtp
+                  ? 'Enter your code'
+                  : 'Sign in'
+              : 'Choose account';
+
+    const heroSubtitle =
+        step === 1
+            ? 'Sign in to manage clients and deliveries.'
+            : step === 2 && useOtp
+              ? `We sent a code to ${username.trim() || 'your contact'}.`
+              : '';
 
     return (
         <div className={styles.container}>
-            <div className={styles.card}>
-                <div className="text-center">
-                    <div className={styles.logoContainer}>
-                        <Image
-                            src={APP_LOGO_PATH}
-                            alt="Logo"
-                            width={200}
-                            height={200}
-                            className={styles.logo}
-                            priority
-                        />
-                    </div>
-                    <h2 className={styles.title}>{title}</h2>
-                    <p className={styles.subtitle}></p>
+            <div className={styles.wrap}>
+                <div className={styles.hero}>
+                    <h1 className={styles.heroTitle}>{heroTitle}</h1>
+                    {heroSubtitle ? <p className={styles.heroSubtitle}>{heroSubtitle}</p> : null}
                 </div>
 
-                {step !== 3 ? (
-                    <form className={styles.form} action={useOtp ? () => {} : action} onSubmit={useOtp ? handleVerifyOtp : undefined}>
-                        <div className={styles.formGroup}>
-                            {step === 1 && (
-                                <div className="animate-in fade-in slide-in-from-right-4 duration-300">
-                                    <label htmlFor="username" className={styles.label}>
-                                        Username, email, or mobile number
-                                    </label>
-                                    <input
-                                        id="username"
-                                        name="username"
-                                        type="text"
-                                        required
-                                        className={styles.inputLarge}
-                                        placeholder="Email, phone, or username"
-                                        value={username}
-                                        onChange={(e) => setUsername(e.target.value)}
-                                        onKeyDown={(e) => {
-                                            if (e.key === 'Enter') {
-                                                e.preventDefault();
-                                                handleNext();
-                                            }
+                <div className={styles.card}>
+                    {step !== 3 ? (
+                        <form className={styles.form} action={useOtp ? () => {} : action} onSubmit={useOtp ? handleVerifyOtp : undefined}>
+                            <div className={styles.formGroup}>
+                                {step === 1 && (
+                                    <div>
+                                        <label htmlFor="username" className={styles.label}>
+                                            Username, email, or mobile number
+                                        </label>
+                                        <input
+                                            id="username"
+                                            name="username"
+                                            type="text"
+                                            required
+                                            className={styles.inputLarge}
+                                            placeholder="Email, phone, or username"
+                                            value={username}
+                                            onChange={(e) => setUsername(e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter') {
+                                                    e.preventDefault();
+                                                    handleNext();
+                                                }
+                                            }}
+                                            disabled={checkingIdentity}
+                                            autoFocus
+                                        />
+                                        {identityError && (
+                                            <div className={styles.errorMessage} style={{ marginTop: '0.5rem' }}>
+                                                {identityError}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {step === 2 && (
+                                    <div>
+                                        <div className={styles.userInfo}>
+                                            <span className={styles.userInfoText}>{username}</span>
+                                            <button type="button" onClick={handleBack} className={styles.changeBtn}>
+                                                Change
+                                            </button>
+                                        </div>
+                                        <input type="hidden" name="username" value={username} />
+
+                                        {useOtp ? (
+                                            <div>
+                                                <label htmlFor="otp" className={styles.label}>
+                                                    Security Code
+                                                </label>
+                                                <input
+                                                    id="otp"
+                                                    name="otpCode"
+                                                    type="text"
+                                                    required
+                                                    className={styles.inputOtp}
+                                                    placeholder="------"
+                                                    value={otpCode}
+                                                    onChange={(e) =>
+                                                        setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))
+                                                    }
+                                                    autoFocus
+                                                    autoComplete="one-time-code"
+                                                />
+                                                <div className={styles.resendContainer}>
+                                                    <span>{otpMessage}</span>
+                                                    {resendTimer > 0 ? (
+                                                        <span style={{ color: 'var(--text-tertiary)' }}>
+                                                            Resend in {resendTimer}s
+                                                        </span>
+                                                    ) : (
+                                                        <button type="button" onClick={handleResendOtp} className={styles.resendBtn}>
+                                                            Resend Code
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div>
+                                                <label htmlFor="password" className={styles.label}>
+                                                    Password
+                                                </label>
+                                                <input
+                                                    id="password"
+                                                    name="password"
+                                                    type="password"
+                                                    required
+                                                    className={styles.inputLarge}
+                                                    placeholder="Enter your password"
+                                                    autoFocus
+                                                />
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+
+                            {!useOtp && step === 2 && state?.message && (
+                                <div className={styles.errorMessage}>{state.message}</div>
+                            )}
+
+                            {useOtp && step === 2 && otpMessage && !otpMessage.includes('sent') && !otpMessage.includes('Resend') && (
+                                <div className={styles.errorMessage}>{otpMessage}</div>
+                            )}
+
+                            <div style={{ marginTop: '1.5rem' }}>
+                                {step === 1 ? (
+                                    <button
+                                        type="button"
+                                        onClick={(e) => {
+                                            e.preventDefault();
+                                            handleNext();
                                         }}
                                         disabled={checkingIdentity}
-                                        autoFocus
-                                    />
-                                    {identityError && (
-                                        <div className={styles.errorMessage} style={{ marginTop: '0.5rem' }}>
-                                            {identityError}
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-
-                            {step === 2 && (
-                                <div className="animate-in fade-in slide-in-from-right-4 duration-300">
-                                    <div className={styles.userInfo}>
-                                        <span className={styles.userInfoText}>{username}</span>
-                                        <button type="button" onClick={handleBack} className={styles.changeBtn}>
-                                            Change
-                                        </button>
-                                    </div>
-                                    <input type="hidden" name="username" value={username} />
-
-                                    {useOtp ? (
-                                        <div>
-                                            <label htmlFor="otp" className={styles.label}>
-                                                Security Code
-                                            </label>
-                                            <input
-                                                id="otp"
-                                                name="otpCode"
-                                                type="text"
-                                                required
-                                                className={styles.inputOtp}
-                                                placeholder="------"
-                                                value={otpCode}
-                                                onChange={(e) =>
-                                                    setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))
-                                                }
-                                                autoFocus
-                                                autoComplete="one-time-code"
-                                            />
-                                            <div className={styles.resendContainer}>
-                                                <span>{otpMessage}</span>
-                                                {resendTimer > 0 ? (
-                                                    <span style={{ color: 'var(--text-tertiary)' }}>
-                                                        Resend in {resendTimer}s
-                                                    </span>
-                                                ) : (
-                                                    <button type="button" onClick={handleResendOtp} className={styles.resendBtn}>
-                                                        Resend Code
-                                                    </button>
-                                                )}
-                                            </div>
-                                        </div>
-                                    ) : (
-                                        <div>
-                                            <label htmlFor="password" className={styles.label}>
-                                                Password
-                                            </label>
-                                            <input
-                                                id="password"
-                                                name="password"
-                                                type="password"
-                                                required
-                                                className={styles.inputLarge}
-                                                placeholder="Enter your password"
-                                                autoFocus
-                                            />
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-                        </div>
-
-                        {!useOtp && step === 2 && state?.message && (
-                            <div className={styles.errorMessage}>{state.message}</div>
-                        )}
-
-                        {useOtp && step === 2 && otpMessage && !otpMessage.includes('sent') && !otpMessage.includes('Resend') && (
-                            <div className={styles.errorMessage}>{otpMessage}</div>
-                        )}
-
-                        <div style={{ marginTop: '1.5rem' }}>
-                            {step === 1 ? (
-                                <button
-                                    type="button"
-                                    onClick={(e) => {
-                                        e.preventDefault();
-                                        handleNext();
-                                    }}
-                                    disabled={checkingIdentity}
-                                    className={styles.btnLarge}
-                                >
-                                    {checkingIdentity ? (
-                                        <>
-                                            <div className={styles.spinner} />
-                                            Checking...
-                                        </>
-                                    ) : (
-                                        'Next'
-                                    )}
-                                </button>
-                            ) : (
-                                <button
-                                    type="submit"
-                                    disabled={isPending || verifyingOtp}
-                                    className={styles.btnLarge}
-                                >
-                                    {isPending || verifyingOtp ? (
-                                        <>
-                                            <div className={styles.spinner} />
-                                            {useOtp ? 'Verifying...' : 'Signing in...'}
-                                        </>
-                                    ) : useOtp ? (
-                                        'Verify & Sign In'
-                                    ) : (
-                                        'Sign In'
-                                    )}
-                                </button>
-                            )}
-                        </div>
-
-                        <p className={styles.secureText}>
-                            <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                width="16"
-                                height="16"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                            >
-                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-                            </svg>
-                            Protected by secure authentication
-                        </p>
-                    </form>
-                ) : (
-                    <div className={styles.form}>
-                        <div className={styles.userInfo}>
-                            <span className={styles.userInfoText}>{username}</span>
-                            <button type="button" onClick={handleBack} className={styles.changeBtn}>
-                                Start over
-                            </button>
-                        </div>
-                        <p className={styles.chooseHint}>
-                            This email is linked to more than one account. Choose which one you want to open.
-                        </p>
-                        <div className={styles.accountChoiceList}>
-                            {accountChoices.map((c) => (
-                                <button
-                                    key={`${c.type}-${c.id}`}
-                                    type="button"
-                                    className={styles.accountChoiceBtn}
-                                    disabled={pickingAccount}
-                                    onClick={() => handlePickAccount(c)}
-                                >
-                                    <span className={styles.accountChoiceTitle}>{c.title}</span>
-                                    {c.subtitle ? (
-                                        <span className={styles.accountChoiceSubtitle}>{c.subtitle}</span>
-                                    ) : null}
-                                </button>
-                            ))}
-                        </div>
-                        {pickError ? <div className={styles.errorMessage}>{pickError}</div> : null}
-                        {identityError && step === 3 ? (
-                            <div className={styles.errorMessage} style={{ marginTop: '0.75rem' }}>
-                                {identityError}
+                                        className={styles.btnLarge}
+                                    >
+                                        {checkingIdentity ? (
+                                            <>
+                                                <div className={styles.spinner} />
+                                                Checking...
+                                            </>
+                                        ) : (
+                                            'Next'
+                                        )}
+                                    </button>
+                                ) : (
+                                    <button
+                                        type="submit"
+                                        disabled={isPending || verifyingOtp}
+                                        className={styles.btnLarge}
+                                    >
+                                        {isPending || verifyingOtp ? (
+                                            <>
+                                                <div className={styles.spinner} />
+                                                {useOtp ? 'Verifying...' : 'Signing in...'}
+                                            </>
+                                        ) : useOtp ? (
+                                            'Verify & Sign In'
+                                        ) : (
+                                            'Sign In'
+                                        )}
+                                    </button>
+                                )}
                             </div>
-                        ) : null}
-                        <p className={styles.secureText}>
-                            <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                width="16"
-                                height="16"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                            >
-                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-                            </svg>
-                            Protected by secure authentication
-                        </p>
-                    </div>
-                )}
+                        </form>
+                    ) : (
+                        <div className={styles.form}>
+                            <div className={styles.userInfo}>
+                                <span className={styles.userInfoText}>{username}</span>
+                                <button type="button" onClick={handleBack} className={styles.changeBtn}>
+                                    Start over
+                                </button>
+                            </div>
+                            <p className={styles.chooseHint}>
+                                This email is linked to more than one account. Choose which one you want to open.
+                            </p>
+                            <div className={styles.accountChoiceList}>
+                                {accountChoices.map((c) => (
+                                    <button
+                                        key={`${c.type}-${c.id}`}
+                                        type="button"
+                                        className={styles.accountChoiceBtn}
+                                        disabled={pickingAccount}
+                                        onClick={() => handlePickAccount(c)}
+                                    >
+                                        <span className={styles.accountChoiceTitle}>{c.title}</span>
+                                        {c.subtitle ? (
+                                            <span className={styles.accountChoiceSubtitle}>{c.subtitle}</span>
+                                        ) : null}
+                                    </button>
+                                ))}
+                            </div>
+                            {pickError ? <div className={styles.errorMessage}>{pickError}</div> : null}
+                            {identityError && step === 3 ? (
+                                <div className={styles.errorMessage} style={{ marginTop: '0.75rem' }}>
+                                    {identityError}
+                                </div>
+                            ) : null}
+                        </div>
+                    )}
+                </div>
+
+                <p className={styles.pageFooter}>Client Food Service · Admin portal</p>
             </div>
         </div>
     );

@@ -107,7 +107,7 @@
     padding: 0.5rem 1rem;
     border: 2px solid #0a0a0a;
     border-radius: 6px;
-    background: #bbf7d0;
+    background: #bfdbfe;
     color: #0a0a0a;
     font-weight: 700;
     font-size: 0.875rem;
@@ -115,7 +115,7 @@
 }
 
 .downloadBtn:hover:not(:disabled) {
-    background: #86efac;
+    background: #93c5fd;
 }
 
 .downloadBtn:disabled {
@@ -127,7 +127,7 @@
     margin-bottom: 1rem;
     padding: 1rem 1.25rem;
     background: #f0fdf4;
-    border: 1px solid #bbf7d0;
+    border: 1px solid #bfdbfe;
     border-radius: 8px;
 }
 
@@ -135,7 +135,7 @@
     margin: 0 0 0.75rem;
     font-size: 0.9rem;
     font-weight: 600;
-    color: #14532d;
+    color: #1d4ed8;
 }
 
 .pickList {
@@ -147,7 +147,7 @@
 .pickBtn {
     text-align: left;
     padding: 0.55rem 0.75rem;
-    border: 1px solid #86efac;
+    border: 1px solid #93c5fd;
     border-radius: 6px;
     background: #fff;
     cursor: pointer;
@@ -156,14 +156,14 @@
 }
 
 .pickBtn:hover {
-    background: #ecfdf5;
+    background: #eff6ff;
     border-color: #4ade80;
 }
 
 .pickHint {
     margin: 0.5rem 0 0;
     font-size: 0.8rem;
-    color: #15803d;
+    color: #1d4ed8;
 }
 
 .pickId {

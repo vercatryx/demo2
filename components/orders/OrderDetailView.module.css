@@ -96,7 +96,7 @@
 }
 .statusPending { background: rgba(217,119,6,0.1); color: var(--color-warning, #d97706); }
 .statusConfirmed { background: rgba(37,99,235,0.1); color: var(--color-primary, #2563eb); }
-.statusCompleted { background: rgba(22,163,74,0.1); color: var(--color-success, #16a34a); }
+.statusCompleted { background: rgba(37, 99, 235,0.1); color: var(--color-success); }
 .statusWaitProof { background: rgba(124,58,237,0.1); color: var(--color-accent, #7c3aed); }
 .statusBilling { background: rgba(217,119,6,0.1); color: var(--color-warning, #d97706); }
 .statusCancelled { background: rgba(220,38,38,0.1); color: var(--color-danger, #dc2626); }
