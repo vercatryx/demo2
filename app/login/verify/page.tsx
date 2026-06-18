@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { verifyOtp } from '@/lib/auth-actions';
+import { LoginShell } from '../LoginShell';
 import styles from '../page.module.css';
 
 export default function VerifyLoginPage() {
@@ -15,7 +16,6 @@ export default function VerifyLoginPage() {
     const [message, setMessage] = useState('');
 
     useEffect(() => {
-        // Get email and code from URL parameters
         const emailParam = searchParams.get('email');
         const codeParam = searchParams.get('code');
 
@@ -24,7 +24,6 @@ export default function VerifyLoginPage() {
         }
         if (codeParam) {
             setCode(codeParam);
-            // Auto-verify if both email and code are provided
             if (emailParam) {
                 handleVerify(emailParam, codeParam);
             }
@@ -39,7 +38,7 @@ export default function VerifyLoginPage() {
 
         setIsVerifying(true);
         setError('');
-        setMessage('Verifying code...');
+        setMessage('Verifying code…');
 
         try {
             const result = await verifyOtp(emailToVerify, codeToVerify);
@@ -47,12 +46,10 @@ export default function VerifyLoginPage() {
                 setError(result.message || 'Verification failed. The code may be invalid or expired.');
                 setIsVerifying(false);
             } else {
-                // Redirect happens in verifyOtp action
-                setMessage('Verification successful! Redirecting...');
+                setMessage('Verification successful. Redirecting…');
             }
-        } catch (error: any) {
-            // Redirect throws error, ignore it
-            if (error.message !== 'NEXT_REDIRECT') {
+        } catch (error: unknown) {
+            if (error instanceof Error && error.message !== 'NEXT_REDIRECT') {
                 setError('An error occurred during verification.');
                 setIsVerifying(false);
             }
@@ -65,17 +62,17 @@ export default function VerifyLoginPage() {
     };
 
     return (
-        <div className={styles.container}>
+        <LoginShell>
             <div className={styles.card}>
-                <div className="text-center">
-                    <h2 className={styles.title}>Verify Your Login</h2>
-                    <p className={styles.subtitle}>
-                        Enter the code sent to your email to complete login
+                <header className={styles.cardHeader}>
+                    <h2 className={styles.cardTitle}>Verify your login</h2>
+                    <p className={styles.cardSubtitle}>
+                        Enter the code from your email to complete sign-in.
                     </p>
-                </div>
+                </header>
 
                 <form className={styles.form} onSubmit={handleSubmit}>
-                    <div className={styles.formGroup}>
+                    <div className={styles.field}>
                         <label htmlFor="email" className={styles.label}>
                             Email
                         </label>
@@ -83,8 +80,8 @@ export default function VerifyLoginPage() {
                             id="email"
                             type="email"
                             required
-                            className={styles.inputLarge}
-                            placeholder="Enter your email"
+                            className={styles.input}
+                            placeholder="you@example.com"
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
                             disabled={isVerifying}
@@ -92,16 +89,17 @@ export default function VerifyLoginPage() {
                         />
                     </div>
 
-                    <div className={styles.formGroup}>
+                    <div className={styles.field}>
                         <label htmlFor="code" className={styles.label}>
-                            Verification Code
+                            Verification code
                         </label>
                         <input
                             id="code"
                             type="text"
+                            inputMode="numeric"
                             required
                             className={styles.inputOtp}
-                            placeholder="------"
+                            placeholder="000000"
                             value={code}
                             onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                             disabled={isVerifying}
@@ -109,61 +107,35 @@ export default function VerifyLoginPage() {
                         />
                     </div>
 
-                    {error && (
-                        <div className={styles.errorMessage}>
-                            {error}
-                        </div>
-                    )}
+                    {error ? <div className={styles.alertError}>{error}</div> : null}
+                    {message && !error ? <div className={styles.alertSuccess}>{message}</div> : null}
 
-                    {message && !error && (
-                        <div style={{ 
-                            padding: '12px', 
-                            backgroundColor: 'var(--color-success-light)', 
-                            color: 'var(--color-success)', 
-                            borderRadius: '8px',
-                            marginBottom: '1rem'
-                        }}>
-                            {message}
-                        </div>
-                    )}
+                    <button
+                        type="submit"
+                        disabled={isVerifying || !email || !code}
+                        className={styles.submitBtn}
+                    >
+                        {isVerifying ? (
+                            <>
+                                <div className={styles.spinner} />
+                                Verifying…
+                            </>
+                        ) : (
+                            'Verify & sign in'
+                        )}
+                    </button>
 
-                    <div style={{ marginTop: '1.5rem' }}>
-                        <button
-                            type="submit"
-                            disabled={isVerifying || !email || !code}
-                            className={styles.btnLarge}
-                        >
-                            {isVerifying ? (
-                                <>
-                                    <div className={styles.spinner} />
-                                    Verifying...
-                                </>
-                            ) : (
-                                'Verify & Sign In'
-                            )}
-                        </button>
-                    </div>
-
-                    <div style={{ marginTop: '1rem', textAlign: 'center' }}>
+                    <div className={styles.backLinkWrap}>
                         <button
                             type="button"
                             onClick={() => router.push('/login')}
-                            className={styles.resendBtn}
-                            style={{ background: 'none', border: 'none', color: 'var(--color-primary)', cursor: 'pointer' }}
+                            className={styles.textBtn}
                         >
-                            Back to Login
+                            Back to sign in
                         </button>
                     </div>
-
-                    <p className={styles.secureText}>
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-                        </svg>
-                        Protected by secure authentication
-                    </p>
                 </form>
             </div>
-        </div>
+        </LoginShell>
     );
 }

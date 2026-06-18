@@ -1,6 +1,7 @@
 'use client';
 
 import { useActionState, useState } from 'react';
+import { Check } from 'lucide-react';
 import {
     login,
     checkLoginIdentity,
@@ -9,6 +10,7 @@ import {
     confirmLoginWithPick,
     type LoginAccountChoice,
 } from '@/lib/auth-actions';
+import { LoginShell } from './LoginShell';
 import styles from './page.module.css';
 
 type Step = 1 | 2 | 3;
@@ -20,6 +22,43 @@ type VerifyOtpClientResult = {
     accountChoices?: LoginAccountChoice[];
     pickToken?: string;
 };
+
+const STEPS = [
+    { id: 1, label: 'Identify' },
+    { id: 2, label: 'Sign in' },
+    { id: 3, label: 'Choose' },
+] as const;
+
+function StepIndicator({ step }: { step: Step }) {
+    return (
+        <div className={styles.stepBar} aria-label="Sign-in progress">
+            {STEPS.map((s, index) => {
+                const isActive = step === s.id;
+                const isDone = step > s.id;
+                return (
+                    <div key={s.id} className={styles.stepTrack}>
+                        {index > 0 && (
+                            <span
+                                className={`${styles.stepConnector} ${step > s.id - 1 ? styles.stepConnectorDone : ''}`}
+                                aria-hidden
+                            />
+                        )}
+                        <div className={styles.stepItem}>
+                            <span
+                                className={`${styles.stepDot} ${isActive ? styles.stepDotActive : ''} ${isDone ? styles.stepDotDone : ''}`}
+                            >
+                                {isDone ? <Check size={12} strokeWidth={2.5} /> : s.id}
+                            </span>
+                            <span className={`${styles.stepLabel} ${isActive ? styles.stepLabelActive : ''}`}>
+                                {s.label}
+                            </span>
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
 
 export default function LoginPage() {
     const [state, action, isPending] = useActionState(login, undefined);
@@ -191,214 +230,207 @@ export default function LoginPage() {
         setPickError('');
     };
 
-    const heroTitle =
+    const cardTitle =
         step === 1
-            ? 'Welcome to Client Food Service'
+            ? 'Sign in'
             : step === 2
               ? useOtp
                   ? 'Enter your code'
-                  : 'Sign in'
+                  : 'Enter password'
               : 'Choose account';
 
-    const heroSubtitle =
+    const cardSubtitle =
         step === 1
-            ? 'Sign in to manage clients and deliveries.'
+            ? 'Use your email, username, or mobile number to continue.'
             : step === 2 && useOtp
-              ? `We sent a code to ${username.trim() || 'your contact'}.`
-              : '';
+              ? `We sent a 6-digit code to ${username.trim() || 'your contact'}.`
+              : step === 2
+                ? 'Enter the password for your account.'
+                : 'This contact is linked to more than one account.';
+
+    const showOtpError =
+        useOtp &&
+        step === 2 &&
+        otpMessage &&
+        !otpMessage.includes('sent') &&
+        !otpMessage.includes('Resend') &&
+        !otpMessage.includes('Resending');
 
     return (
-        <div className={styles.container}>
-            <div className={styles.wrap}>
-                <div className={styles.hero}>
-                    <h1 className={styles.heroTitle}>{heroTitle}</h1>
-                    {heroSubtitle ? <p className={styles.heroSubtitle}>{heroSubtitle}</p> : null}
-                </div>
+        <LoginShell>
+            <StepIndicator step={step} />
 
-                <div className={styles.card}>
-                    {step !== 3 ? (
-                        <form className={styles.form} action={useOtp ? () => {} : action} onSubmit={useOtp ? handleVerifyOtp : undefined}>
-                            <div className={styles.formGroup}>
-                                {step === 1 && (
-                                    <div>
-                                        <label htmlFor="username" className={styles.label}>
-                                            Username, email, or mobile number
-                                        </label>
-                                        <input
-                                            id="username"
-                                            name="username"
-                                            type="text"
-                                            required
-                                            className={styles.inputLarge}
-                                            placeholder="Email, phone, or username"
-                                            value={username}
-                                            onChange={(e) => setUsername(e.target.value)}
-                                            onKeyDown={(e) => {
-                                                if (e.key === 'Enter') {
-                                                    e.preventDefault();
-                                                    handleNext();
-                                                }
-                                            }}
-                                            disabled={checkingIdentity}
-                                            autoFocus
-                                        />
-                                        {identityError && (
-                                            <div className={styles.errorMessage} style={{ marginTop: '0.5rem' }}>
-                                                {identityError}
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
+            <div className={styles.card}>
+                <header className={styles.cardHeader}>
+                    <h2 className={styles.cardTitle}>{cardTitle}</h2>
+                    {cardSubtitle ? <p className={styles.cardSubtitle}>{cardSubtitle}</p> : null}
+                </header>
 
-                                {step === 2 && (
-                                    <div>
-                                        <div className={styles.userInfo}>
-                                            <span className={styles.userInfoText}>{username}</span>
-                                            <button type="button" onClick={handleBack} className={styles.changeBtn}>
-                                                Change
-                                            </button>
-                                        </div>
-                                        <input type="hidden" name="username" value={username} />
-
-                                        {useOtp ? (
-                                            <div>
-                                                <label htmlFor="otp" className={styles.label}>
-                                                    Security Code
-                                                </label>
-                                                <input
-                                                    id="otp"
-                                                    name="otpCode"
-                                                    type="text"
-                                                    required
-                                                    className={styles.inputOtp}
-                                                    placeholder="------"
-                                                    value={otpCode}
-                                                    onChange={(e) =>
-                                                        setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))
-                                                    }
-                                                    autoFocus
-                                                    autoComplete="one-time-code"
-                                                />
-                                                <div className={styles.resendContainer}>
-                                                    <span>{otpMessage}</span>
-                                                    {resendTimer > 0 ? (
-                                                        <span style={{ color: 'var(--text-tertiary)' }}>
-                                                            Resend in {resendTimer}s
-                                                        </span>
-                                                    ) : (
-                                                        <button type="button" onClick={handleResendOtp} className={styles.resendBtn}>
-                                                            Resend Code
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        ) : (
-                                            <div>
-                                                <label htmlFor="password" className={styles.label}>
-                                                    Password
-                                                </label>
-                                                <input
-                                                    id="password"
-                                                    name="password"
-                                                    type="password"
-                                                    required
-                                                    className={styles.inputLarge}
-                                                    placeholder="Enter your password"
-                                                    autoFocus
-                                                />
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-
-                            {!useOtp && step === 2 && state?.message && (
-                                <div className={styles.errorMessage}>{state.message}</div>
-                            )}
-
-                            {useOtp && step === 2 && otpMessage && !otpMessage.includes('sent') && !otpMessage.includes('Resend') && (
-                                <div className={styles.errorMessage}>{otpMessage}</div>
-                            )}
-
-                            <div style={{ marginTop: '1.5rem' }}>
-                                {step === 1 ? (
-                                    <button
-                                        type="button"
-                                        onClick={(e) => {
+                {step !== 3 ? (
+                    <form
+                        className={styles.form}
+                        action={useOtp ? () => {} : action}
+                        onSubmit={useOtp ? handleVerifyOtp : undefined}
+                    >
+                        {step === 1 && (
+                            <div className={styles.field}>
+                                <label htmlFor="username" className={styles.label}>
+                                    Username, email, or mobile number
+                                </label>
+                                <input
+                                    id="username"
+                                    name="username"
+                                    type="text"
+                                    required
+                                    className={styles.input}
+                                    placeholder="you@example.com"
+                                    value={username}
+                                    onChange={(e) => setUsername(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
                                             e.preventDefault();
                                             handleNext();
-                                        }}
-                                        disabled={checkingIdentity}
-                                        className={styles.btnLarge}
-                                    >
-                                        {checkingIdentity ? (
-                                            <>
-                                                <div className={styles.spinner} />
-                                                Checking...
-                                            </>
-                                        ) : (
-                                            'Next'
-                                        )}
-                                    </button>
-                                ) : (
-                                    <button
-                                        type="submit"
-                                        disabled={isPending || verifyingOtp}
-                                        className={styles.btnLarge}
-                                    >
-                                        {isPending || verifyingOtp ? (
-                                            <>
-                                                <div className={styles.spinner} />
-                                                {useOtp ? 'Verifying...' : 'Signing in...'}
-                                            </>
-                                        ) : useOtp ? (
-                                            'Verify & Sign In'
-                                        ) : (
-                                            'Sign In'
-                                        )}
-                                    </button>
-                                )}
+                                        }
+                                    }}
+                                    disabled={checkingIdentity}
+                                    autoFocus
+                                />
+                                {identityError ? (
+                                    <div className={styles.alertError}>{identityError}</div>
+                                ) : null}
                             </div>
-                        </form>
-                    ) : (
-                        <div className={styles.form}>
-                            <div className={styles.userInfo}>
-                                <span className={styles.userInfoText}>{username}</span>
-                                <button type="button" onClick={handleBack} className={styles.changeBtn}>
-                                    Start over
-                                </button>
-                            </div>
-                            <p className={styles.chooseHint}>
-                                This email is linked to more than one account. Choose which one you want to open.
-                            </p>
-                            <div className={styles.accountChoiceList}>
-                                {accountChoices.map((c) => (
-                                    <button
-                                        key={`${c.type}-${c.id}`}
-                                        type="button"
-                                        className={styles.accountChoiceBtn}
-                                        disabled={pickingAccount}
-                                        onClick={() => handlePickAccount(c)}
-                                    >
-                                        <span className={styles.accountChoiceTitle}>{c.title}</span>
-                                        {c.subtitle ? (
-                                            <span className={styles.accountChoiceSubtitle}>{c.subtitle}</span>
-                                        ) : null}
-                                    </button>
-                                ))}
-                            </div>
-                            {pickError ? <div className={styles.errorMessage}>{pickError}</div> : null}
-                            {identityError && step === 3 ? (
-                                <div className={styles.errorMessage} style={{ marginTop: '0.75rem' }}>
-                                    {identityError}
-                                </div>
-                            ) : null}
-                        </div>
-                    )}
-                </div>
+                        )}
 
-                <p className={styles.pageFooter}>Client Food Service · Admin portal</p>
+                        {step === 2 && (
+                            <>
+                                <div className={styles.identityChip}>
+                                    <span className={styles.identityText}>{username}</span>
+                                    <button type="button" onClick={handleBack} className={styles.textBtn}>
+                                        Change
+                                    </button>
+                                </div>
+                                <input type="hidden" name="username" value={username} />
+
+                                {useOtp ? (
+                                    <div className={styles.field}>
+                                        <label htmlFor="otp" className={styles.label}>
+                                            Security code
+                                        </label>
+                                        <input
+                                            id="otp"
+                                            name="otpCode"
+                                            type="text"
+                                            inputMode="numeric"
+                                            required
+                                            className={styles.inputOtp}
+                                            placeholder="000000"
+                                            value={otpCode}
+                                            onChange={(e) =>
+                                                setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))
+                                            }
+                                            autoFocus
+                                            autoComplete="one-time-code"
+                                        />
+                                        <div className={styles.resendRow}>
+                                            <span className={styles.resendHint}>{otpMessage}</span>
+                                            {resendTimer > 0 ? (
+                                                <span>Resend in {resendTimer}s</span>
+                                            ) : (
+                                                <button type="button" onClick={handleResendOtp} className={styles.textBtn}>
+                                                    Resend code
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className={styles.field}>
+                                        <label htmlFor="password" className={styles.label}>
+                                            Password
+                                        </label>
+                                        <input
+                                            id="password"
+                                            name="password"
+                                            type="password"
+                                            required
+                                            className={styles.input}
+                                            placeholder="Enter your password"
+                                            autoFocus
+                                        />
+                                    </div>
+                                )}
+                            </>
+                        )}
+
+                        {!useOtp && step === 2 && state?.message ? (
+                            <div className={styles.alertError}>{state.message}</div>
+                        ) : null}
+
+                        {showOtpError ? <div className={styles.alertError}>{otpMessage}</div> : null}
+
+                        {step === 1 ? (
+                            <button
+                                type="button"
+                                onClick={(e) => {
+                                    e.preventDefault();
+                                    handleNext();
+                                }}
+                                disabled={checkingIdentity}
+                                className={styles.submitBtn}
+                            >
+                                {checkingIdentity ? (
+                                    <>
+                                        <div className={styles.spinner} />
+                                        Checking…
+                                    </>
+                                ) : (
+                                    'Continue'
+                                )}
+                            </button>
+                        ) : (
+                            <button type="submit" disabled={isPending || verifyingOtp} className={styles.submitBtn}>
+                                {isPending || verifyingOtp ? (
+                                    <>
+                                        <div className={styles.spinner} />
+                                        {useOtp ? 'Verifying…' : 'Signing in…'}
+                                    </>
+                                ) : useOtp ? (
+                                    'Verify & sign in'
+                                ) : (
+                                    'Sign in'
+                                )}
+                            </button>
+                        )}
+                    </form>
+                ) : (
+                    <div className={styles.form}>
+                        <div className={styles.identityChip}>
+                            <span className={styles.identityText}>{username}</span>
+                            <button type="button" onClick={handleBack} className={styles.textBtn}>
+                                Start over
+                            </button>
+                        </div>
+                        <p className={styles.chooseHint}>Select the account you want to open.</p>
+                        <div className={styles.accountList}>
+                            {accountChoices.map((c) => (
+                                <button
+                                    key={`${c.type}-${c.id}`}
+                                    type="button"
+                                    className={styles.accountBtn}
+                                    disabled={pickingAccount}
+                                    onClick={() => handlePickAccount(c)}
+                                >
+                                    <span className={styles.accountTitle}>{c.title}</span>
+                                    {c.subtitle ? (
+                                        <span className={styles.accountSubtitle}>{c.subtitle}</span>
+                                    ) : null}
+                                </button>
+                            ))}
+                        </div>
+                        {pickError ? <div className={styles.alertError}>{pickError}</div> : null}
+                        {identityError ? <div className={styles.alertError}>{identityError}</div> : null}
+                    </div>
+                )}
             </div>
-        </div>
+        </LoginShell>
     );
 }
