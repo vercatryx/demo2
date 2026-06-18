@@ -4,6 +4,8 @@ import { createSession, deleteSession, verifySession } from './session';
 import { hashPassword, verifyPassword } from './password';
 import { redirect } from 'next/navigation';
 import { supabase } from './supabase';
+import { getSupabaseAdmin } from './platform/supabase-admin';
+import { getSupabaseServiceKeySetupHint } from './supabase-env';
 import { randomUUID } from 'crypto';
 
 import { getSettings } from './actions';
@@ -31,6 +33,53 @@ type IdentityMatch = {
 
 function generateOtp() {
     return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+/** Env super-admin credentials (supports ADMIN_* and ENV_ADMIN_* names). */
+function getEnvAdminUsername(): string | undefined {
+    const v = process.env.ADMIN_USERNAME || process.env.ENV_ADMIN_USERNAME;
+    return v?.trim() || undefined;
+}
+
+function getEnvAdminPassword(): string | undefined {
+    const v = process.env.ADMIN_PASSWORD || process.env.ENV_ADMIN_PASSWORD;
+    return v?.trim() || undefined;
+}
+
+function isEnvSuperAdminLogin(loginInput: string, password: string): boolean {
+    const envUser = getEnvAdminUsername();
+    const envPass = getEnvAdminPassword();
+    if (!envUser || !envPass) return false;
+    return normalizeAdminUsername(loginInput) === normalizeAdminUsername(envUser) && password === envPass;
+}
+
+/** Service-role Supabase client for admins table — never falls back to publishable/anon keys. */
+function requireAdminsDb() {
+    return getSupabaseAdmin();
+}
+
+function adminWriteBlockedMessage(error: unknown): string | null {
+    const e = error as { code?: string; message?: string; details?: string };
+    const text = `${e.code ?? ''} ${e.message ?? ''} ${e.details ?? ''}`.toLowerCase();
+    if (
+        text.includes('policy') ||
+        text.includes('permission') ||
+        text.includes('42501') ||
+        text.includes('row-level security') ||
+        text.includes('jwt') ||
+        text.includes('invalid api key')
+    ) {
+        return `Could not save admin (database permission error). ${getSupabaseServiceKeySetupHint()}`;
+    }
+    return null;
+}
+
+function formatAdminDbError(error: unknown): string {
+    const blocked = adminWriteBlockedMessage(error);
+    if (blocked) return blocked;
+    const e = error as { message?: string; details?: string; code?: string };
+    const detail = [e.message, e.details].filter(Boolean).join(' — ');
+    return detail ? `Failed to add admin: ${detail}` : 'Failed to add admin.';
 }
 
 export async function sendOtp(_identifier: string) {
@@ -156,16 +205,14 @@ export async function login(prevState: any, formData: FormData) {
         const loginNorm = normalizeAdminUsername(loginInput);
 
         // 1. Check Env Super Admin
-        const envUser = process.env.ADMIN_USERNAME;
-        const envPass = process.env.ADMIN_PASSWORD;
-
-        if (envUser && envPass && loginNorm === normalizeAdminUsername(envUser) && password === envPass) {
+        if (isEnvSuperAdminLogin(loginInput, password)) {
             await createSession('super-admin', 'Admin', 'super-admin');
             redirect('/');
         }
 
         // 2. Check Database Admins (flexible username match)
-        const { data: adminsList, error: adminsLoginError } = await supabase
+        const adminsDb = requireAdminsDb();
+        const { data: adminsList, error: adminsLoginError } = await adminsDb
             .from('admins')
             .select('id, username, password, name, role');
 
@@ -346,13 +393,13 @@ async function collectIdentityMatches(identifier: string): Promise<{
     const normalizedInput = normalizeEmail(identifier);
     const matches: IdentityMatch[] = [];
 
-    const envUser = process.env.ADMIN_USERNAME;
+    const envUser = getEnvAdminUsername();
     const normForAdmin = normalizeAdminUsername(originalTrimmed);
     if (envUser && normForAdmin && normForAdmin === normalizeAdminUsername(envUser)) {
         matches.push({ type: 'admin' });
     }
 
-    const { data: admins, error: adminsError } = await supabase.from('admins').select('id, username');
+    const { data: admins, error: adminsError } = await requireAdminsDb().from('admins').select('id, username');
     if (adminsError) {
         console.error('[collectIdentityMatches] Error querying admins:', adminsError);
     } else if (admins && admins.length > 0) {
@@ -494,11 +541,14 @@ async function buildEligibleLoginChoices(matches: IdentityMatch[]): Promise<Logi
 }
 
 async function completeLoginFromMatch(match: IdentityMatch & { id?: string }, emailForEnvCheck: string) {
-    const envUser = process.env.ADMIN_USERNAME;
     const trimmedEmail = emailForEnvCheck.trim();
 
     if (match.type === 'admin') {
-        if (!match.id && envUser && normalizeAdminUsername(trimmedEmail) === normalizeAdminUsername(envUser)) {
+        if (
+            !match.id &&
+            getEnvAdminUsername() &&
+            normalizeAdminUsername(trimmedEmail) === normalizeAdminUsername(getEnvAdminUsername()!)
+        ) {
             await createSession('super-admin', 'Admin', 'super-admin');
             redirect('/');
         } else if (match.id) {
@@ -544,6 +594,12 @@ export async function checkEmailIdentity(identifier: string) {
 
     if (matches.length === 0) {
         return { exists: false, type: null, enablePasswordless: false };
+    }
+
+    // Env super-admin has no DB row — still allow password login on step 2.
+    const envAdminMatch = matches.find((m) => m.type === 'admin' && !m.id);
+    if (envAdminMatch && !matches.some((m) => m.type === 'admin' && m.id)) {
+        return { exists: true, type: 'admin' as const, id: undefined, enablePasswordless: false };
     }
 
     if (matches.length > 1) {
@@ -725,11 +781,14 @@ export async function confirmLoginWithPick(pickToken: string, choice: { type: Lo
 export async function getAdmins() {
     await verifySession();
     try {
-        const { data, error } = await supabase
+        const { data, error } = await requireAdminsDb()
             .from('admins')
             .select('id, username, created_at, name, role')
             .order('created_at', { ascending: true });
-        if (error) return [];
+        if (error) {
+            console.error('Error fetching admins:', error);
+            return [];
+        }
         return data || [];
     } catch (error) {
         console.error('Error fetching admins:', error);
@@ -740,12 +799,15 @@ export async function getAdmins() {
 export async function getBrooklynAdmins() {
     await verifySession();
     try {
-        const { data, error } = await supabase
+        const { data, error } = await requireAdminsDb()
             .from('admins')
             .select('id, username, created_at, name')
             .eq('role', 'brooklyn_admin')
             .order('created_at', { ascending: true });
-        if (error) return [];
+        if (error) {
+            console.error('Error fetching Brooklyn admins:', error);
+            return [];
+        }
         return data || [];
     } catch (error) {
         console.error('Error fetching Brooklyn admins:', error);
@@ -755,36 +817,56 @@ export async function getBrooklynAdmins() {
 
 export async function addAdmin(prevState: any, formData: FormData) {
     await verifySession();
-    const username = formData.get('username') as string;
+    const username = (formData.get('username') as string)?.trim();
     const password = formData.get('password') as string;
-    const name = (formData.get('name') as string) || 'Admin';
+    const name = ((formData.get('name') as string) || 'Admin').trim();
     const role = (formData.get('role') as string) || 'admin';
 
     if (!username || !password) {
         return { message: 'Username and password are required.' };
     }
 
+    let db;
+    try {
+        db = requireAdminsDb();
+    } catch (error) {
+        console.error('addAdmin: missing service key', error);
+        return { message: getSupabaseServiceKeySetupHint() };
+    }
+
     // Check availability
-    const { data: existing } = await supabase
+    const { data: existing, error: existingError } = await db
         .from('admins')
         .select('id')
         .eq('username', username)
         .maybeSingle();
+    if (existingError) {
+        console.error('addAdmin: username check failed', existingError);
+        return { message: formatAdminDbError(existingError) };
+    }
     if (existing) {
         return { message: 'Username already exists.' };
     }
 
     const hashedPassword = await hashPassword(password);
     const id = randomUUID();
+    const now = new Date().toISOString();
 
     try {
-        const { error } = await supabase
-            .from('admins')
-            .insert([{ id, username, password: hashedPassword, name, role: role === 'brooklyn_admin' ? 'brooklyn_admin' : 'admin' }]);
+        const { error } = await db.from('admins').insert([
+            {
+                id,
+                username,
+                password: hashedPassword,
+                name,
+                role: role === 'brooklyn_admin' ? 'brooklyn_admin' : 'admin',
+                updated_at: now,
+            },
+        ]);
         if (error) throw error;
     } catch (error) {
         console.error('Error adding admin:', error);
-        return { message: 'Failed to add admin.' };
+        return { message: formatAdminDbError(error) };
     }
 
     return { message: 'Admin added successfully.', success: true };
@@ -796,11 +878,11 @@ export async function deleteAdmin(id: string) {
     // Also, don't delete the last admin if relying on DB. But we have Env admin.
 
     try {
-        const { error } = await supabase.from('admins').delete().eq('id', id);
+        const { error } = await requireAdminsDb().from('admins').delete().eq('id', id);
         if (error) throw error;
     } catch (error) {
         console.error('Error deleting admin:', error);
-        throw new Error('Failed to delete admin');
+        throw new Error(adminWriteBlockedMessage(error) ?? 'Failed to delete admin');
     }
 }
 
@@ -828,14 +910,17 @@ export async function updateAdmin(prevState: any, formData: FormData) {
     }
     
     try {
-        const { error } = await supabase
+        const { error } = await requireAdminsDb()
             .from('admins')
             .update(payload)
             .eq('id', id);
         if (error) throw error;
     } catch (error) {
         console.error('Error updating admin:', error);
-        return { message: 'Failed to update admin.', success: false };
+        return {
+            message: adminWriteBlockedMessage(error) ?? 'Failed to update admin.',
+            success: false,
+        };
     }
 
     return { message: 'Admin updated successfully.', success: true };

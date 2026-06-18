@@ -46,11 +46,21 @@ export function getSupabaseDbKeySource(): SupabaseDbKeySource | null {
  * Use when an operation must bypass RLS like the old service role; requires one of these set.
  */
 export function getSupabaseServerSecretKey(): string | undefined {
-    const secret = process.env.SUPABASE_SECRET_KEY?.trim();
-    const legacyService = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
-    if (isUsableSupabaseKey(secret)) return secret;
-    if (isUsableSupabaseKey(legacyService)) return legacyService;
+    const candidates = [
+        process.env.SUPABASE_SECRET_KEY,
+        process.env.SUPABASE_SERVICE_ROLE_KEY,
+        process.env.SUPABASE_SERVICE_KEY,
+    ];
+    for (const raw of candidates) {
+        const v = raw?.trim();
+        if (isUsableSupabaseKey(v)) return v;
+    }
     return undefined;
+}
+
+/** Human-readable hint when service key env vars are missing on the host. */
+export function getSupabaseServiceKeySetupHint(): string {
+    return 'Set SUPABASE_SECRET_KEY (sb_secret_…) or SUPABASE_SERVICE_ROLE_KEY on the server/host — not only NEXT_PUBLIC_* publishable keys.';
 }
 
 /** Extension-style fallbacks: full chain including publishable + legacy anon. */
