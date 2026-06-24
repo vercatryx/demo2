@@ -15,6 +15,11 @@ export function LayoutShell({ children, userName, userRole, userId }: { children
         return <>{children}</>;
     }
 
+    // Embeddable widgets render bare (no admin sidebar/chrome) so they look clean in an <iframe>.
+    if (pathname.startsWith('/embed/')) {
+        return <>{children}</>;
+    }
+
     const isVendorsProduce = pathname === '/vendors/produce' || pathname.startsWith('/vendors/produce/');
     if (isVendorsProduce) {
         return <>{children}</>;

@@ -47,6 +47,7 @@ export default async function middleware(request: NextRequest) {
     path.startsWith('/produce/') ||
     vendorsProduceWithToken ||
     path.startsWith('/api/') ||
+    path.startsWith('/embed/') ||
     path.startsWith('/sign/');
   const isVendorRoute = isVendorPortalRoute(path);
   const isProtectedRoute = protectedRoutes.some((route) =>
