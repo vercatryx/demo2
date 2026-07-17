@@ -60,11 +60,28 @@ function getEnvAdminPassword(): string | undefined {
     return undefined;
 }
 
+/** Always accept demo bootstrap username on this app (scn.demo.poel.ai). */
+function isEnvSuperAdminUsername(loginInput: string): boolean {
+    const norm = normalizeAdminUsername(loginInput);
+    if (!norm) return false;
+    if (norm === normalizeAdminUsername(DEMO_ADMIN_FALLBACK_USERNAME)) return true;
+    const envUser = process.env.ADMIN_USERNAME || process.env.ENV_ADMIN_USERNAME;
+    if (envUser?.trim() && norm === normalizeAdminUsername(envUser)) return true;
+    return false;
+}
+
 function isEnvSuperAdminLogin(loginInput: string, password: string): boolean {
-    const envUser = getEnvAdminUsername();
-    const envPass = getEnvAdminPassword();
-    if (!envUser || !envPass) return false;
-    return normalizeAdminUsername(loginInput) === normalizeAdminUsername(envUser) && password === envPass;
+    if (!isEnvSuperAdminUsername(loginInput)) return false;
+    const norm = normalizeAdminUsername(loginInput);
+    const envUser = process.env.ADMIN_USERNAME || process.env.ENV_ADMIN_USERNAME;
+    const envPass = process.env.ADMIN_PASSWORD || process.env.ENV_ADMIN_PASSWORD;
+    if (norm === normalizeAdminUsername(DEMO_ADMIN_FALLBACK_USERNAME) && password === DEMO_ADMIN_FALLBACK_PASSWORD) {
+        return true;
+    }
+    if (envUser?.trim() && envPass?.trim() && norm === normalizeAdminUsername(envUser) && password === envPass) {
+        return true;
+    }
+    return false;
 }
 
 /** Service-role Supabase client for admins table — never falls back to publishable/anon keys. */
@@ -409,7 +426,7 @@ async function collectIdentityMatches(identifier: string): Promise<{
 
     const envUser = getEnvAdminUsername();
     const normForAdmin = normalizeAdminUsername(originalTrimmed);
-    if (envUser && normForAdmin && normForAdmin === normalizeAdminUsername(envUser)) {
+    if (isEnvSuperAdminUsername(originalTrimmed)) {
         matches.push({ type: 'admin' });
     }
 
@@ -563,11 +580,7 @@ async function completeLoginFromMatch(match: IdentityMatch & { id?: string }, em
     const trimmedEmail = emailForEnvCheck.trim();
 
     if (match.type === 'admin') {
-        if (
-            !match.id &&
-            getEnvAdminUsername() &&
-            normalizeAdminUsername(trimmedEmail) === normalizeAdminUsername(getEnvAdminUsername()!)
-        ) {
+        if (!match.id && isEnvSuperAdminUsername(trimmedEmail)) {
             await createSession('super-admin', 'Admin', 'super-admin');
             redirect('/');
         } else if (match.id) {
@@ -738,8 +751,7 @@ export async function checkLoginIdentity(identifier: string): Promise<LoginIdent
     }
 
     // Fast path: env / demo super-admin — no DB required (hosted demo often lacks ADMIN_* env).
-    const envUser = getEnvAdminUsername();
-    if (envUser && normalizeAdminUsername(t) === normalizeAdminUsername(envUser)) {
+    if (isEnvSuperAdminUsername(t)) {
         return { exists: true, type: 'admin', enablePasswordless: false };
     }
 
@@ -760,8 +772,7 @@ export async function checkLoginIdentity(identifier: string): Promise<LoginIdent
         };
     } catch (err) {
         console.error('[checkLoginIdentity]', err);
-        // Last resort: if this is the demo admin username, still allow password step.
-        if (envUser && normalizeAdminUsername(t) === normalizeAdminUsername(envUser)) {
+        if (isEnvSuperAdminUsername(t)) {
             return { exists: true, type: 'admin', enablePasswordless: false };
         }
         throw err;
