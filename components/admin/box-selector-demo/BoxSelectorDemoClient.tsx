@@ -52,6 +52,10 @@ type Props = {
      * When set (Global Settings), items from this category cannot mix with other categories in the same box.
      */
     foodBoxCategoryId?: string | null;
+    /** Client portal: default quantity for newly added boxes (e.g. approved meals/week for Boxes clients). */
+    boxAllowanceMultiplier?: number | null;
+    /** Client portal: hide phase-out items from the picker unless already on this box. */
+    hidePhaseoutUnlessOnOrder?: boolean;
 };
 
 type BoxOrderState = {
@@ -101,19 +105,20 @@ function getStandardBoxType(boxTypes: BoxType[]): BoxType | undefined {
     );
 }
 
-function defaultBox(boxTypes: BoxType[]): BoxOrderState {
+function defaultBox(boxTypes: BoxType[], allowanceMultiplier?: number | null): BoxOrderState {
     const bt = getStandardBoxType(boxTypes);
+    const qty = Number(allowanceMultiplier);
     return {
         boxTypeId: bt?.id,
         vendorId: bt?.vendorId ?? undefined,
-        quantity: 1,
+        quantity: Number.isFinite(qty) && qty > 0 ? Math.floor(qty) : 1,
         items: {},
         itemNotes: {},
     };
 }
 
-function makeBoxRow(boxTypes: BoxType[]): BoxRow {
-    return { slotId: crypto.randomUUID(), ...defaultBox(boxTypes) };
+function makeBoxRow(boxTypes: BoxType[], allowanceMultiplier?: number | null): BoxRow {
+    return { slotId: crypto.randomUUID(), ...defaultBox(boxTypes, allowanceMultiplier) };
 }
 
 function normalizeBoxValue(input: BoxSelectorBoxValue | undefined, boxTypes: BoxType[]): BoxOrderState {
@@ -282,6 +287,7 @@ type BoxPickerWindowProps = {
     simpleUi?: boolean;
     finderEasePrompt?: ReactNode;
     foodBoxCategoryId?: string | null;
+    hidePhaseoutUnlessOnOrder?: boolean;
 };
 
 function renderItemNumberEmphasis(
@@ -326,6 +332,7 @@ function BoxPickerWindow({
     simpleUi = false,
     finderEasePrompt,
     foodBoxCategoryId,
+    hidePhaseoutUnlessOnOrder = false,
 }: BoxPickerWindowProps) {
     const finderRef = useRef<HTMLDivElement>(null);
     const [finderCategoryId, setFinderCategoryId] = useState<string | null>(null);
@@ -383,10 +390,11 @@ function BoxPickerWindow({
                 (i) =>
                     i.isActive !== false &&
                     i.categoryId === categoryId &&
-                    ((i.vendorId == null || i.vendorId === '') || i.vendorId === vid),
+                    ((i.vendorId == null || i.vendorId === '') || i.vendorId === vid) &&
+                    (!hidePhaseoutUnlessOnOrder || i.phaseout !== true || (box.items?.[i.id] ?? 0) > 0),
             );
         },
-        [menuItems, box.vendorId],
+        [menuItems, box.vendorId, hidePhaseoutUnlessOnOrder, box.items],
     );
 
     const canIncreaseItem = useCallback(
@@ -1466,11 +1474,13 @@ export function BoxSelectorDemoClient({
     simpleUi = false,
     embeddedFinderEasePrompt,
     foodBoxCategoryId,
+    boxAllowanceMultiplier,
+    hidePhaseoutUnlessOnOrder = false,
 }: Props) {
     const isControlled = value !== undefined;
     const [layoutTick, setLayoutTick] = useState(0);
     const [boxes, setBoxes] = useState<BoxRow[]>(() =>
-        isControlled ? rowsFromValue(value, [], boxTypes) : [makeBoxRow(boxTypes)],
+        isControlled ? rowsFromValue(value, [], boxTypes) : [makeBoxRow(boxTypes, boxAllowanceMultiplier)],
     );
     const [isNarrowShelfLayout, setIsNarrowShelfLayout] = useState(false);
     const [layoutConfig, setLayoutConfig] = useState<DemoBoxLayoutConfig | null>(null);
@@ -1521,11 +1531,11 @@ export function BoxSelectorDemoClient({
     const commitBoxes = useCallback((updater: (prev: BoxRow[]) => BoxRow[]) => {
         setBoxes((prev) => {
             const next = updater(prev);
-            const ensured = next.length > 0 ? next : [makeBoxRow(boxTypes)];
+            const ensured = next.length > 0 ? next : [makeBoxRow(boxTypes, boxAllowanceMultiplier)];
             if (onChange) onChange(serializeRows(ensured));
             return ensured;
         });
-    }, [boxTypes, onChange]);
+    }, [boxTypes, onChange, boxAllowanceMultiplier]);
 
     const patchBox = useCallback((slotId: string, patch: Partial<BoxOrderState>) => {
         commitBoxes((prev) => prev.map((b) => (b.slotId === slotId ? { ...b, ...patch } : b)));
@@ -1624,13 +1634,13 @@ export function BoxSelectorDemoClient({
     const addBox = () => {
         commitBoxes((prev) => {
             if (maxBoxes && prev.length >= maxBoxes) return prev;
-            return [...prev, makeBoxRow(boxTypes)];
+            return [...prev, makeBoxRow(boxTypes, boxAllowanceMultiplier)];
         });
     };
 
     const removeBox = (slotId: string) => {
         commitBoxes((prev) => {
-            if (prev.length <= 1) return [makeBoxRow(boxTypes)];
+            if (prev.length <= 1) return [makeBoxRow(boxTypes, boxAllowanceMultiplier)];
             return prev.filter((b) => b.slotId !== slotId);
         });
     };
@@ -1692,6 +1702,7 @@ export function BoxSelectorDemoClient({
                             simpleUi={simpleUi}
                             finderEasePrompt={embeddedFinderEasePrompt}
                             foodBoxCategoryId={foodBoxCategoryId}
+                            hidePhaseoutUnlessOnOrder={hidePhaseoutUnlessOnOrder}
                         />
                     ))}
                 </div>

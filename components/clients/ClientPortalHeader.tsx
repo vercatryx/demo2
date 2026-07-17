@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { ClientProfile } from '@/lib/types';
-import { Plus, AlertTriangle, Calendar } from 'lucide-react';
+import { Plus, AlertTriangle, Calendar, ArrowLeft } from 'lucide-react';
 import styles from './ClientPortal.module.css';
 
 interface Props {
@@ -20,11 +20,9 @@ interface Props {
 
     // Actions
     onAddVendor?: () => void;
-    onAddMeal?: (mealType: string) => void;
 
     // UI State
     isCompact?: boolean;
-    mealCategories?: { id: string, name: string, mealType: string }[];
     orderConfig?: any;
 }
 
@@ -37,11 +35,12 @@ export default function ClientPortalHeader({
     validationError,
     takingEffectDate,
     onAddVendor,
-    onAddMeal,
-    mealCategories = [],
     orderConfig = {},
 }: Props) {
     const serviceType = effectiveServiceType ?? client.serviceType;
+    // Show whenever the Food Service (Food/Meal) widget is on screen — no separate client check.
+    const showAddKitchenFacilities =
+        (serviceType === 'Food' || serviceType === 'Meal') && !!onAddVendor;
     const isOverLimit = approvedLimit && totalMealCount > approvedLimit;
     const isUnderLimit = approvedLimit && totalMealCount < (approvedLimit * 0.5); // Just a heuristic
 
@@ -55,12 +54,12 @@ export default function ClientPortalHeader({
                     {/* Meal Count - Only show for Food Service */}
                     {serviceType === 'Food' && (
                         <div className={styles.headerCount}>
-                            <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-tertiary)', fontWeight: 600 }}>
+                            <span className={styles.headerCountLabel}>
                                 Current Order
                             </span>
-                            <div style={{ fontSize: '1.5rem', fontWeight: 700, color: countColor, lineHeight: 1 }}>
+                            <div className={styles.headerCountValue} style={{ color: countColor }}>
                                 {totalMealCount}
-                                {approvedLimit && <span style={{ fontSize: '1rem', color: 'var(--text-tertiary)', fontWeight: 500 }}> / {approvedLimit}</span>}
+                                {approvedLimit && <span className={styles.headerCountLimit}> / {approvedLimit}</span>}
                             </div>
                         </div>
                     )}
@@ -68,10 +67,10 @@ export default function ClientPortalHeader({
                     {/* Effect Date */}
                     {takingEffectDate && (
                         <div className={styles.headerEffectDate}>
-                            <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-tertiary)', fontWeight: 600 }}>
+                            <span className={styles.headerEffectLabel}>
                                 Changes take effect from
                             </span>
-                            <div style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <div className={styles.headerEffectValue}>
                                 <Calendar size={16} />
                                 {takingEffectDate}
                             </div>
@@ -94,8 +93,8 @@ export default function ClientPortalHeader({
 
             {/* Bottom Row: Actions */}
             <div className={styles.headerBottomRow}>
-                {/* Add kitchen facilities button — Food only (client-facing label) */}
-                {serviceType === 'Food' && onAddVendor && (
+                {/* Add kitchen facilities — any Food-program client on Food/Meal order UI */}
+                {showAddKitchenFacilities && (
                     <button
                         onClick={onAddVendor}
                         className="btn btn-warning"
@@ -116,37 +115,15 @@ export default function ClientPortalHeader({
                     </button>
                 )}
 
-                {/* Add Meal Buttons - Food OR Meal */}
-                {(serviceType === 'Food' || serviceType === 'Meal') && onAddMeal && (
-                    <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
-                        {mealCategories
-                            .map(c => c.mealType)
-                            .filter((val, idx, arr) => arr.indexOf(val) === idx)
-                            .map(type => (
-                                <button
-                                    key={type}
-                                    type="button"
-                                    onClick={() => onAddMeal(type)}
-                                    className="btn"
-                                    style={{
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '8px',
-                                        backgroundColor: '#fbbf24',
-                                        border: 'none',
-                                        color: 'black',
-                                        fontWeight: 600,
-                                        padding: '8px 16px',
-                                        borderRadius: '8px',
-                                        boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-                                        fontSize: '0.92rem'
-                                    }}
-                                >
-                                    <Plus size={16} /> Add {type}
-                                </button>
-                            ))
-                        }
-                    </div>
+                {/* Meal packages: direct add hidden — use kitchen facilities below */}
+                {(serviceType === 'Food' || serviceType === 'Meal') && (
+                    <p className={styles.kitchenFacilitiesMealHint}>
+                        <ArrowLeft size={18} className={styles.kitchenFacilitiesMealHintArrow} aria-hidden />
+                        <span>
+                            All options can be selected through{' '}
+                            <strong>kitchen facilities</strong>
+                        </span>
+                    </p>
                 )}
             </div>
         </div>

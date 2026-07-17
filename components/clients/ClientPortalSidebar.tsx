@@ -1,8 +1,9 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useTransition } from 'react';
 import { logout } from '@/lib/auth-actions';
-import { User, Mail, Phone, MapPin, Package, Truck, Info, CreditCard, LogOut } from 'lucide-react';
+import type { SwitchableClientAccount } from '@/lib/client-portal-account-switch';
+import { Mail, Phone, MapPin, Package, CreditCard, LogOut, Users } from 'lucide-react';
 import { ClientProfile } from '@/lib/types';
 import styles from './ClientPortal.module.css';
 
@@ -10,54 +11,62 @@ interface Props {
     client: ClientProfile;
     /** Effective service type for current order (orderConfig.serviceType ?? client.serviceType). Use this for UI, not client.serviceType. */
     serviceType?: string;
+    switchableAccounts?: SwitchableClientAccount[];
+    /** Account switching UI is portal v2 only; legacy sidebar never shows the switcher. */
+    showAccountSwitcher?: boolean;
+    onSwitchAccount?: (targetClientId: string) => Promise<{ success: boolean; message?: string } | void>;
 }
 
-export default function ClientPortalSidebar({ client, serviceType: effectiveServiceType }: Props) {
+export default function ClientPortalSidebar({
+    client,
+    serviceType: effectiveServiceType,
+    switchableAccounts = [],
+    showAccountSwitcher = false,
+    onSwitchAccount,
+}: Props) {
     const serviceType = effectiveServiceType ?? client.serviceType;
+    const showAccountSwitcherUi = showAccountSwitcher && switchableAccounts.length > 1;
+    const [switchError, setSwitchError] = useState('');
+    const [isPending, startTransition] = useTransition();
+
+    const handleAccountSwitch = (targetClientId: string) => {
+        if (targetClientId === client.id || isPending || !onSwitchAccount) return;
+        setSwitchError('');
+        startTransition(async () => {
+            try {
+                const result = await onSwitchAccount(targetClientId);
+                if (result && !result.success) {
+                    setSwitchError(result.message || 'Could not switch accounts.');
+                }
+            } catch (error) {
+                if (error instanceof Error && error.message === 'ACCOUNT_SWITCH_CANCELLED') {
+                    return;
+                }
+            }
+        });
+    };
+
     return (
         <div className={styles.sidebarColumn} style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-            <div className={styles.sidebarScroll} style={{ padding: '24px', flex: 1, overflowY: 'auto' }}>
+            <div className={styles.sidebarInner}>
                 {/* Header / Avatar */}
-                <div style={{ marginBottom: '32px', textAlign: 'center' }}>
-                    <div style={{
-                        width: '80px',
-                        height: '80px',
-                        background: 'var(--color-primary-light)',
-                        borderRadius: '50%',
-                        margin: '0 auto 16px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: 'var(--color-primary)',
-                        fontSize: '2rem',
-                        fontWeight: 600
-                    }}>
+                <div className={styles.sidebarProfile}>
+                    <div className={styles.sidebarAvatar}>
                         {client.fullName.charAt(0)}
                     </div>
-                    <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: '0 0 4px', color: 'var(--text-primary)' }}>
-                        {client.fullName}
-                    </h2>
-                    <div style={{ fontSize: '0.85rem', color: 'var(--text-tertiary)', marginBottom: '4px' }}>
-                        ID: {client.id}
-                    </div>
-                    <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
-                        Client Portal
+                    <div className={styles.sidebarProfileText}>
+                        <h2 className={styles.sidebarName}>{client.fullName}</h2>
+                        <div className={styles.sidebarMeta}>ID: {client.id}</div>
+                        <div className={styles.sidebarSubtitle}>Client Portal</div>
                     </div>
                 </div>
 
                 {/* Info Sections */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                <div className={styles.sidebarSections}>
 
                     {/* Contact Info */}
-                    <div className="section">
-                        <h3 style={{
-                            fontSize: '0.75rem',
-                            textTransform: 'uppercase',
-                            letterSpacing: '0.05em',
-                            color: 'var(--text-tertiary)',
-                            marginBottom: '12px',
-                            fontWeight: 600
-                        }}>
+                    <div className={`section ${styles.sidebarSection}`}>
+                        <h3 className={styles.sidebarSectionTitle}>
                             Contact Details
                         </h3>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -79,15 +88,8 @@ export default function ClientPortalSidebar({ client, serviceType: effectiveServ
                     </div>
 
                     {/* Service Info */}
-                    <div className="section">
-                        <h3 style={{
-                            fontSize: '0.75rem',
-                            textTransform: 'uppercase',
-                            letterSpacing: '0.05em',
-                            color: 'var(--text-tertiary)',
-                            marginBottom: '12px',
-                            fontWeight: 600
-                        }}>
+                    <div className={`section ${styles.sidebarSection}`}>
+                        <h3 className={styles.sidebarSectionTitle}>
                             Service Plan
                         </h3>
                         <div style={{
@@ -97,11 +99,11 @@ export default function ClientPortalSidebar({ client, serviceType: effectiveServ
                             border: '1px solid var(--border-color)'
                         }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', fontWeight: 600, color: 'var(--text-primary)' }}>
-                                {serviceType === 'Food' ? <UtensilsIcon /> : <Package size={18} />}
-                                <span>{serviceType} Service</span>
+                                {serviceType === 'Food' || serviceType === 'Meal' ? <UtensilsIcon /> : <Package size={18} />}
+                                <span>{serviceType === 'Meal' ? 'Food' : serviceType} Service</span>
                             </div>
 
-                            {serviceType === 'Food' ? (
+                            {serviceType === 'Food' || serviceType === 'Meal' ? (
                                 <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', display: 'flex', gap: '8px', alignItems: 'center' }}>
                                     <CreditCard size={14} />
                                     <span>Approved: <strong>{client.approvedMealsPerWeek || 0}</strong> meals/week</span>
@@ -118,8 +120,33 @@ export default function ClientPortalSidebar({ client, serviceType: effectiveServ
                 </div>
             </div>
 
-            {/* Logout Button */}
-            <div style={{ padding: '24px', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-surface)' }}>
+            {/* Account switch + Sign out */}
+            <div className={styles.sidebarLogout}>
+                {showAccountSwitcherUi && (
+                    <div className={styles.accountSwitch}>
+                        <label htmlFor="portal-account-switch" className={styles.accountSwitchLabel}>
+                            <Users size={16} />
+                            <span>Switch account</span>
+                        </label>
+                        <select
+                            id="portal-account-switch"
+                            className={styles.accountSwitchSelect}
+                            value={client.id}
+                            disabled={isPending}
+                            onChange={(e) => handleAccountSwitch(e.target.value)}
+                        >
+                            {switchableAccounts.map((account) => (
+                                <option key={account.id} value={account.id}>
+                                    {account.name}
+                                    {account.address ? ` — ${account.address}` : ''}
+                                </option>
+                            ))}
+                        </select>
+                        {switchError && (
+                            <p className={styles.accountSwitchError} role="alert">{switchError}</p>
+                        )}
+                    </div>
+                )}
                 <form action={logout}>
                     <button
                         type="submit"

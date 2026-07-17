@@ -58,6 +58,48 @@ export function getDayNumber(dayName: string): number | undefined {
     return DAY_NAME_TO_NUMBER[dayName];
 }
 
+/** Monday-first display order used in client/admin UIs */
+export const WEEKDAY_DISPLAY_ORDER = [
+    'Monday',
+    'Tuesday',
+    'Wednesday',
+    'Thursday',
+    'Friday',
+    'Saturday',
+    'Sunday',
+] as const;
+
+/** Canonical weekday name (e.g. "monday" → "Monday"), or null if not a weekday. */
+export function normalizeWeekdayName(day: string): string | null {
+    const t = day.trim();
+    if (!t) return null;
+    const match = WEEKDAY_DISPLAY_ORDER.find((d) => d.toLowerCase() === t.toLowerCase());
+    return match ?? null;
+}
+
+function weekdaySortIndex(day: string): number {
+    const canonical = normalizeWeekdayName(day);
+    if (!canonical) return 999;
+    return WEEKDAY_DISPLAY_ORDER.indexOf(canonical as (typeof WEEKDAY_DISPLAY_ORDER)[number]);
+}
+
+/** Sort day names in Monday → Sunday order for consistent UI display */
+export function sortWeekdays(days: string[]): string[] {
+    return [...days].sort((a, b) => weekdaySortIndex(a) - weekdaySortIndex(b));
+}
+
+/** True when every non-empty label is a weekday name. */
+export function areAllWeekdayLabels(labels: string[]): boolean {
+    const trimmed = labels.map((l) => l.trim()).filter(Boolean);
+    return trimmed.length > 0 && trimmed.every((l) => normalizeWeekdayName(l) != null);
+}
+
+/** Sort labels Monday → Sunday when all are weekday names; otherwise return a copy unchanged. */
+export function sortWeekdayLabelsIfAll(labels: string[]): string[] {
+    if (!areAllWeekdayLabels(labels)) return [...labels];
+    return sortWeekdays(labels);
+}
+
 /**
  * Get all delivery day numbers for a vendor
  */

@@ -1,4 +1,5 @@
-import { APP_BRAND_NAME } from '@/lib/brand';
+/** Same asset as `components/Sidebar.tsx` and login — `next/image` src `/mainLogo.jpg`. */
+export const ADMIN_BRAND_LOGO_PATH = '/mainLogo.jpg';
 
 /**
  * Absolute base URL for `/public` assets in outgoing mail (images must be fully qualified).
@@ -17,6 +18,12 @@ export function getPublicSiteBaseUrl(): string {
     return baseUrl.replace(/\/$/, '');
 }
 
+export function getBrandedEmailLogoSrc(): string {
+    const baseUrl = getPublicSiteBaseUrl();
+    const logoOverride = process.env.CLIENT_STATUS_EMAIL_LOGO_URL?.trim();
+    return logoOverride || `${baseUrl}${ADMIN_BRAND_LOGO_PATH}`;
+}
+
 export function escapeHtml(s: string): string {
     return s
         .replace(/&/g, '&amp;')
@@ -27,19 +34,22 @@ export function escapeHtml(s: string): string {
 
 export type BrandedEmailShellOptions = {
     bodyHtml: string;
+    logoSrc?: string;
     logoAlt?: string;
-    /** When true, header title is centered (mass messaging). Default false (left-aligned). */
+    /** When true, logo is centered in the header (mass messaging). Default false (left-aligned). */
     centerLogo?: boolean;
 };
 
 const BODY_PARAGRAPH_STYLE =
     'margin:0 0 16px 0;color:#1e293b;font-family:Georgia,\'Times New Roman\',Times,serif;font-size:16px;line-height:1.65;';
 
-/** Table-based layout for broad email client support; header is text-only (no logo image). */
+/** Table-based layout for broad email client support; header uses hosted logo image. */
 export function buildBrandedEmailShell(opts: BrandedEmailShellOptions): string {
-    const logoAlt = opts.logoAlt ?? APP_BRAND_NAME;
+    const logoSrc = opts.logoSrc ?? getBrandedEmailLogoSrc();
+    const logoAlt = opts.logoAlt ?? 'Logo';
     const centerLogo = opts.centerLogo ?? false;
-    const headerAlign = centerLogo ? 'center' : 'left';
+    const logoAlign = centerLogo ? 'center' : 'left';
+    const logoMargin = centerLogo ? '0 auto' : '0';
 
     return `
 <!DOCTYPE html>
@@ -56,8 +66,8 @@ export function buildBrandedEmailShell(opts: BrandedEmailShellOptions): string {
     <td align="center">
       <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="max-width:600px;width:100%;border-collapse:collapse;background-color:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(12,35,64,0.12);">
         <tr>
-          <td style="padding:20px 28px 18px 28px;background-color:#ffffff;text-align:${headerAlign};border-bottom:1px solid #e5e7eb;font-family:Arial,Helvetica,sans-serif;font-size:18px;font-weight:600;line-height:1.3;color:#0f172a;">
-            ${escapeHtml(logoAlt)}
+          <td style="padding:20px 28px 18px 28px;line-height:0;background-color:#ffffff;text-align:${logoAlign};border-bottom:1px solid #e5e7eb;">
+            <img src="${escapeHtml(logoSrc)}" alt="${escapeHtml(logoAlt)}" width="240" height="240" style="display:block;max-width:220px;width:100%;height:auto;margin:${logoMargin};border:0;outline:none;text-decoration:none;">
           </td>
         </tr>
         <tr>
@@ -70,7 +80,7 @@ export function buildBrandedEmailShell(opts: BrandedEmailShellOptions): string {
         </tr>
         <tr>
           <td style="padding:20px 36px;background-color:#f1f5f9;border-top:1px solid #e2e8f0;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.5;color:#64748b;text-align:center;">
-            ${escapeHtml(APP_BRAND_NAME)} · <a href="tel:+18459351870" style="color:#0c2340;text-decoration:none;">845-935-1870</a>
+            Triangle Square · SCN Program · <a href="tel:+18459351870" style="color:#0c2340;text-decoration:none;">845-935-1870</a>
           </td>
         </tr>
       </table>
@@ -92,5 +102,5 @@ export function brandedPhoneParagraph(): string {
 }
 
 export function brandedSignoff(): string {
-    return `<p style="margin:0 0 8px 0;color:#1e293b;">Thank you.</p><p style="margin:0;font-weight:bold;color:#0c2340;">The ${escapeHtml(APP_BRAND_NAME)} Team</p>`;
+    return `<p style="margin:0 0 8px 0;color:#1e293b;">Thank you.</p><p style="margin:0;font-weight:bold;color:#0c2340;">The Triangle Square Team</p>`;
 }

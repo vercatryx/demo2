@@ -15,8 +15,9 @@ ALTER TABLE clients ALTER COLUMN zip TYPE varchar(20);
 ALTER TABLE clients ALTER COLUMN county TYPE varchar(200);
 ALTER TABLE clients ALTER COLUMN phone_number TYPE varchar(510);
 ALTER TABLE clients ALTER COLUMN secondary_phone_number TYPE varchar(510);
-ALTER TABLE clients ALTER COLUMN client_id_external TYPE varchar(200);
-ALTER TABLE clients ALTER COLUMN case_id_external TYPE varchar(200);
+-- Full Unite Us URLs exceed varchar(100)/varchar(200); store as text.
+ALTER TABLE clients ALTER COLUMN client_id_external TYPE text;
+ALTER TABLE clients ALTER COLUMN case_id_external TYPE text;
 ALTER TABLE clients ALTER COLUMN sign_token TYPE varchar(510);
 ALTER TABLE clients ALTER COLUMN updated_by TYPE varchar(510);
 

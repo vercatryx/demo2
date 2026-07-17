@@ -620,6 +620,55 @@ async function completeLoginFromMatch(match: IdentityMatch & { id?: string }, em
     }
 }
 
+/** Portal v2 account switcher: swap the active session to a linked/contact-matched client account. */
+export async function switchClientPortalAccount(targetClientId: string) {
+    if (!targetClientId) {
+        return { success: false, message: 'No account selected.' };
+    }
+
+    try {
+        const { getSession } = await import('./session');
+        const session = await getSession();
+        if (!session?.userId || session.role !== 'client') {
+            return { success: false, message: 'Unauthorized.' };
+        }
+
+        const { getSwitchableClientAccounts } = await import('./client-portal-account-switch');
+        const { data: currentClient } = await supabase
+            .from('clients')
+            .select('service_type')
+            .eq('id', session.userId)
+            .maybeSingle();
+
+        if (targetClientId !== session.userId) {
+            const switchable = await getSwitchableClientAccounts(session.userId);
+            if (!switchable.some((account) => account.id === targetClientId)) {
+                return { success: false, message: 'You cannot switch to that account.' };
+            }
+        }
+
+        const { data: client } = await supabase
+            .from('clients')
+            .select('full_name, service_type')
+            .eq('id', targetClientId)
+            .maybeSingle();
+
+        await createSession(targetClientId, client?.full_name || 'Client', 'client');
+        redirect(await resolveClientPortalPath(supabase, targetClientId, client?.service_type ?? currentClient?.service_type ?? null));
+    } catch (error) {
+        const e = error as { message?: string; digest?: string };
+        if (
+            e?.message === 'NEXT_REDIRECT' ||
+            e?.digest === 'NEXT_REDIRECT' ||
+            (typeof e?.digest === 'string' && e.digest.startsWith('NEXT_REDIRECT'))
+        ) {
+            throw error;
+        }
+        console.error('Switch client portal account error:', error);
+        return { success: false, message: 'Could not switch accounts.' };
+    }
+}
+
 // Helper to check identity AND return global passwordless setting
 export async function checkEmailIdentity(identifier: string) {
     if (!identifier) return { exists: false, type: null, enablePasswordless: false };

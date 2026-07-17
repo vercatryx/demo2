@@ -111,6 +111,16 @@ export function isExceedingMaximum(value: number, maximum: number): boolean {
 }
 
 /**
+ * Checks if a value is at or over a maximum limit with fuzzy tolerance.
+ * @param value The actual value
+ * @param maximum The limit
+ * @returns true if value >= maximum - TOLERANCE
+ */
+export function isAtOrOverMaximum(value: number, maximum: number): boolean {
+    return value >= maximum - VAL_TOLERANCE;
+}
+
+/**
  * Checks if a value meets an exact target with fuzzy tolerance.
  * @param value The actual value
  * @param target The target value

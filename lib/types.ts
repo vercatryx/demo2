@@ -202,6 +202,7 @@ export interface ClientFoodOrder {
       }[];
     };
   };
+  notes?: string | null;
   created_at?: string;
   updated_at?: string;
   updated_by?: string;
@@ -219,6 +220,7 @@ export interface ClientMealOrder {
       itemNotes?: { [itemId: string]: string };
     }
   };
+  notes?: string | null;
   created_at?: string;
   updated_at?: string;
   updated_by?: string;
@@ -261,6 +263,12 @@ export interface Vendor {
   cutoffHours?: number; // Hours before delivery cutoff
   /** Classic portal alias for cutoff (days) */
   cutoffDays?: number;
+  /** Display order in client portal and admin vendor list */
+  sortOrder?: number;
+  /** Icon/image for portal v2 department browse */
+  portalImageUrl?: string | null;
+  /** Hero background on vendor section landing in portal v2 */
+  portalHeroImageUrl?: string | null;
   locations?: { id: string; name: string; locationId?: string }[];
 }
 
@@ -272,9 +280,29 @@ export interface ItemCategory {
   isActive?: boolean;
 }
 
+export interface MenuItemDropdownSubGroup {
+  label: string;
+  options: string[];
+  /** Optional UPC per sub-choice label (admin-only; resolved at export). */
+  optionUpcs?: Record<string, string>;
+  /** Optional phase-out flag per sub-choice label (hidden from new clients). */
+  optionPhaseouts?: Record<string, boolean>;
+}
+
+/** One sub-dropdown or a list of sub-dropdowns (e.g. 7 juice slots under Monday). */
+export type MenuItemDropdownSubEntry = MenuItemDropdownSubGroup | MenuItemDropdownSubGroup[];
+
 export interface MenuItemDropdownGroup {
   label: string;
   options: string[];
+  /** Max choices a client may pick from this dropdown (default 1 = single select). */
+  maxSelections?: number;
+  /** Optional UPC per choice label (admin-only; resolved at export). */
+  optionUpcs?: Record<string, string>;
+  /** Optional phase-out flag per choice label (hidden from new clients). */
+  optionPhaseouts?: Record<string, boolean>;
+  /** Optional sub-dropdown(s) per parent option (key = exact option label). */
+  subDropdowns?: Record<string, MenuItemDropdownSubEntry>;
 }
 
 export interface MenuItem {
@@ -284,11 +312,20 @@ export interface MenuItem {
   value: number;
   priceEach?: number;
   isActive: boolean;
+  /** When true, hidden from clients who do not already have the item on their order. */
+  phaseout?: boolean;
   categoryId?: string | null;
   quotaValue?: number; // How much this item counts towards a quota (default 1)
   minimumOrder?: number; // Minimum order quantity required for this product (default 0, meaning no minimum)
   imageUrl?: string | null; // Image URL for the menu item
-  sortOrder?: number; // Sort order for displaying menu items (default 0)
+  /** Display order in client portal / admin lists */
+  sortOrder?: number;
+  /** Raw DB dropdown_options — used client-side to rebuild groups (incl. sub-dropdown arrays). */
+  dropdownOptions?: unknown;
+  /** Optional brand label for portal filters */
+  brand?: string | null;
+  /** Admin UI: derived from app_settings portal featured section assignments */
+  portalFeaturedSection?: string | null;
   dropdownGroups?: MenuItemDropdownGroup[];
   notesEnabled?: boolean;
   dropdownEnabled?: boolean;
@@ -314,9 +351,15 @@ export interface MealItem {
   quotaValue: number;
   priceEach?: number;
   isActive: boolean;
+  /** When true, hidden from clients who do not already have the item on their order. */
+  phaseout?: boolean;
   vendorId?: string; // Optional as legacy items might not have it yet
   imageUrl?: string | null;
   sortOrder?: number;
+  notesEnabled?: boolean;
+  dropdownEnabled?: boolean;
+  /** Labeled dropdowns; selections stored in order line itemNotes like vendor menu_items. */
+  dropdownGroups?: MenuItemDropdownGroup[];
 }
 
 export interface BoxQuota {
@@ -386,6 +429,23 @@ export interface AppSettings {
   enablePasswordlessLogin?: boolean;
   textOnDelivery?: boolean;
   foodBoxCategoryId?: string | null;
+  /** When true, client login is disabled and clients see a maintenance message. */
+  clientLoginMaintenanceMode?: boolean;
+  /** Shown on the client login screen when maintenance mode is on. */
+  clientLoginMaintenanceMessage?: string | null;
+  /** When true, clients see the portal v2 browse UI (Food/Boxes). */
+  portalV2Enabled?: boolean;
+  /** Admin-curated featured sections on portal home (item id → section label) */
+  portalFeaturedItems?: {
+    food: Record<string, string>;
+    box: Record<string, string>;
+  };
+  /** Preset featured section titles (food and boxes have separate lists) */
+  portalFeaturedSectionNames?: import('./portal-featured-items').PortalFeaturedSectionNames;
+  /** Flexible promo / content blocks on portal home */
+  portalHomeBlocks?: import('./portal-home-blocks').PortalHomeBlock[];
+  /** Interleaved order of promo cards and featured sections below the welcome area */
+  portalHomeLayoutOrder?: import('./portal-home-layout').PortalHomeLayoutOrder;
 }
 
 export interface OrderHistoryLog {

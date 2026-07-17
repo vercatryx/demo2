@@ -48,57 +48,31 @@ import { inferLegacyChangeKind, type ClientChangeKind } from './audit/clientChan
 import type { ChangeDisplayTag } from './audit/clientChangeTags';
 import { inferAdminChangeTags } from './audit/clientChangeTags';
 import { hasAnyProofUrl, primaryProofUrl, proofPayloadForDb } from './proof-of-delivery-urls';
+import { handleError, mapClientFromDB } from './client-mappers';
+import { parsePortalFeaturedItems, parsePortalFeaturedSectionNames } from './portal-featured-items';
+import { parsePortalHomeBlocks, withDefaultPortalHomeBlocks } from './portal-home-blocks';
+import { parsePortalHomeLayoutOrder } from './portal-home-layout';
 
 export type { MealPlannerOrderResult } from './meal-planner-utils';
 export type { DietaryFlags } from './dietary-preferences-note';
+
+// Portal v2 server actions (`getFoodMenuLayoutConfig`, `getPortalSaveProbe`,
+// `syncOrderHistoryIfStale`, `getClientPortalHomeConfig`, etc.) and box menu layout
+// actions (`getBoxMenuLayoutConfig`, `upsertBoxMenuLayoutConfig`) live in
+// `./portal-v2-server-actions` and `./merge-triangle-actions` respectively.
+// Intentionally NOT re-exported from here: this file has a top-level `'use server'`
+// directive, and Next's "use server" file checker requires every export (including
+// re-exports it can't statically verify as async) to be an async function — that
+// breaks the production Turbopack build. Import those directly from their own
+// modules instead of from `@/lib/actions`.
 
 // Meal planner orders use meal_planner_orders and meal_planner_order_items (no longer upcoming_orders)
 const MEAL_PLANNER_SERVICE_TYPE = 'meal_planner';
 
 // --- HELPERS ---
-function handleError(error: any, context?: string) {
-    if (error) {
-        const contextMsg = context ? `[${context}] ` : '';
-        console.error(`Supabase Error ${contextMsg}:`, {
-            message: error.message,
-            code: error.code,
-            details: error.details,
-            hint: error.hint,
-            fullError: error
-        });
-        
-        // Check for DNS/connection errors first (most critical)
-        if (isConnectionError(error)) {
-            console.error(getConnectionErrorHelp(error));
-            return; // Don't show other error messages if it's a connection issue
-        }
-        
-        // Check for DNS/connection errors first (most critical)
-        if (isConnectionError(error)) {
-            console.error(getConnectionErrorHelp(error));
-            throw new Error(error.message);
-        }
-        
-        // Check for RLS/permission errors
-        if (error.code === 'PGRST301' || error.message?.includes('permission denied') || error.message?.includes('RLS') || error.message?.includes('row-level security')) {
-            console.error('⚠️  RLS (Row Level Security) may be blocking this query. Consider:');
-            console.error('   1. Setting SUPABASE_SECRET_KEY (or legacy SUPABASE_SERVICE_ROLE_KEY)');
-            console.error('   2. Running sql/disable-rls.sql to disable RLS');
-            console.error('   3. Running sql/enable-permissive-rls.sql to add permissive policies');
-        }
-        
-        // Check for schema permission errors (42501)
-        if (error.code === '42501' || (error.message?.includes('permission denied for schema') && error.message?.includes('public'))) {
-            console.error('⚠️  Database schema permission error (42501) detected!');
-            console.error('   This means the database roles don\'t have proper permissions on the public schema.');
-            console.error('   SOLUTION: Run the SQL script sql/fix-schema-permissions.sql in your Supabase SQL Editor.');
-            console.error('   This will grant the necessary permissions to anon, authenticated, and service_role roles.');
-            console.error('   See: https://supabase.com/docs/guides/troubleshooting/database-api-42501-errors');
-        }
-        
-        throw new Error(error.message);
-    }
-}
+// `handleError` and `mapClientFromDB` live in `./client-mappers` (not here) because
+// this file has a top-level `'use server'` directive, which requires every export
+// to be an async function — see the comment on that file for details.
 
 function logQueryError(error: any, table: string, operation: string = 'select') {
     if (error) {
@@ -1037,21 +1011,50 @@ export async function deleteBoxType(id: string) {
 
 // --- SETTINGS ACTIONS ---
 
-export async function getSettings() {
+export async function getSettings(): Promise<AppSettings> {
+    const defaults: AppSettings = {
+        weeklyCutoffDay: 'Friday',
+        weeklyCutoffTime: '17:00',
+        reportEmail: '',
+        enablePasswordlessLogin: false,
+        textOnDelivery: false,
+        foodBoxCategoryId: null,
+        portalV2Enabled: false,
+        portalFeaturedItems: { food: {}, box: {} },
+        portalFeaturedSectionNames: { food: [], box: [] },
+        portalHomeBlocks: withDefaultPortalHomeBlocks([]),
+        portalHomeLayoutOrder: { food: [], boxes: [] },
+        clientLoginMaintenanceMode: false,
+        clientLoginMaintenanceMessage: null,
+    };
     try {
         const { data, error } = await supabase.from('app_settings').select('*').eq('id', '1').single();
-        if (error || !data) return { weeklyCutoffDay: 'Friday', weeklyCutoffTime: '17:00', reportEmail: '', enablePasswordlessLogin: false, textOnDelivery: false };
+        if (error || !data) return defaults;
 
         return {
             weeklyCutoffDay: data.weekly_cutoff_day,
             weeklyCutoffTime: data.weekly_cutoff_time,
             reportEmail: data.report_email || '',
             enablePasswordlessLogin: data.enable_passwordless_login || false,
-            textOnDelivery: data.text_on_delivery || false
+            textOnDelivery: data.text_on_delivery || false,
+            foodBoxCategoryId: (data as any).food_box_category_id ?? null,
+            clientLoginMaintenanceMode: (data as any).client_login_maintenance_mode === true,
+            clientLoginMaintenanceMessage:
+                (data as { client_login_maintenance_message?: string | null }).client_login_maintenance_message ??
+                null,
+            portalV2Enabled: (data as any).portal_v2_enabled === true,
+            portalFeaturedItems: parsePortalFeaturedItems((data as any).portal_featured_items),
+            portalFeaturedSectionNames: parsePortalFeaturedSectionNames(
+                (data as any).portal_featured_section_names,
+            ),
+            portalHomeBlocks: withDefaultPortalHomeBlocks(
+                parsePortalHomeBlocks((data as any).portal_home_blocks),
+            ),
+            portalHomeLayoutOrder: parsePortalHomeLayoutOrder((data as any).portal_home_layout_order),
         };
     } catch (error) {
         console.error('Error fetching settings:', error);
-        return { weeklyCutoffDay: 'Friday', weeklyCutoffTime: '17:00', reportEmail: '', enablePasswordlessLogin: false, textOnDelivery: false };
+        return defaults;
     }
 }
 
@@ -4195,80 +4198,6 @@ export async function deleteNutritionist(id: string) {
 }
 
 // --- CLIENT ACTIONS ---
-
-function mapClientFromDB(c: any): ClientProfile {
-    // Supabase automatically handles JSON fields, so we can use them directly
-    const rawActiveOrder = c.upcoming_order || {};
-    const serviceType = (c.service_type || 'Food') as ServiceType;
-    // Hydrate stored payload to UI OrderConfiguration shape (handles legacy and schema-only payloads)
-    const activeOrder = fromStoredUpcomingOrder(rawActiveOrder, serviceType) ?? (Object.keys(rawActiveOrder).length > 0 ? rawActiveOrder : undefined);
-    const billings = c.billings || null;
-    const visits = c.visits || null;
-
-    return {
-        id: c.id,
-        fullName: c.full_name,
-        email: c.email || '',
-        address: c.address || '',
-        phoneNumber: c.phone_number || '',
-        secondaryPhoneNumber: c.secondary_phone_number || null,
-        navigatorId: c.navigator_id || '',
-        endDate: c.end_date || '',
-        screeningTookPlace: c.screening_took_place,
-        screeningSigned: c.screening_signed,
-        screeningStatus: c.screening_status || 'not_started',
-        notes: c.notes || '',
-        statusId: c.status_id || '',
-        serviceType: c.service_type as any,
-        approvedMealsPerWeek: c.approved_meals_per_week,
-        parentClientId: c.parent_client_id || null,
-        dob: c.dob || null,
-        cin: c.cin ?? null,
-        authorizedAmount: c.authorized_amount ?? null,
-        voucherAmount: c.voucher_amount ?? null,
-        expirationDate: c.expiration_date || null,
-        activeOrder: activeOrder ?? undefined,
-        // New fields from dietfantasy
-        firstName: c.first_name || null,
-        lastName: c.last_name || null,
-        apt: c.apt || null,
-        city: c.city || null,
-        state: c.state || null,
-        zip: c.zip || null,
-        county: c.county || null,
-        // Single Unite Us link: store full URL in case_id_external; normalize when reading (legacy had separate case + client ids)
-        clientIdExternal: null,
-        caseIdExternal: (c.case_id_external && String(c.case_id_external).startsWith('http'))
-            ? c.case_id_external
-            : composeUniteUsUrl(c.case_id_external || null, c.client_id_external || null) || c.case_id_external || null,
-        medicaid: c.medicaid ?? false,
-        paused: c.paused ?? false,
-        complex: c.complex ?? false,
-        bill: c.bill ?? true,
-        delivery: c.delivery ?? true,
-        doNotText: c.do_not_text ?? false,
-        doNotTextReason: c.do_not_text_reason || null,
-        doNotTextNumbers: c.do_not_text_numbers || {},
-        dislikes: c.dislikes || null,
-        latitude: c.latitude ?? null,
-        longitude: c.longitude ?? null,
-        lat: c.lat ?? null,
-        lng: c.lng ?? null,
-        geocodedAt: c.geocoded_at || null,
-        billings: billings,
-        visits: visits,
-        signToken: c.sign_token || null,
-        assignedDriverId: c.assigned_driver_id || null,
-        produceVendorId: c.produce_vendor_id || null,
-        produceRosterEffectiveAt: c.produce_roster_effective_at ?? null,
-        mealPlannerData: c.meal_planner_data ?? null,
-        uniteAccount: c.unite_account || null,
-        history: c.history || null,
-        archivedAt: c.archived_at ?? null,
-        createdAt: c.created_at,
-        updatedAt: c.updated_at
-    };
-}
 
 /** Fetch id->fullName map for given client IDs. Use for parent/dependent lookups instead of loading all clients. */
 export async function getClientNamesByIds(ids: string[]): Promise<Record<string, string>> {
@@ -9358,12 +9287,29 @@ export async function getRecentOrdersForClient(clientId: string, limit: number =
 export async function updateClientUpcomingOrder(
     clientId: string,
     upcomingOrder: any,
-    options?: { skipOrderHistory?: boolean; skipRevalidation?: boolean }
+    options?: {
+        skipOrderHistory?: boolean;
+        skipRevalidation?: boolean;
+        /** Portal autosave: append a lightweight order_history audit row only when the saved order actually changed. */
+        syncHistoryIfChanged?: boolean;
+        /** Tags the audit row as a "portal session" save (vs. a plain portal autosave) when syncHistoryIfChanged is used. */
+        portalSessionHistory?: boolean;
+        /** No-op in demo-food (Triangle's server-side dropdown/catalog preflight isn't ported here); accepted for call-site parity. */
+        skipServerCatalogPreflight?: boolean;
+        savedFrom?: import('./order-history-source').OrderHistorySource;
+    }
 ) {
     if (!clientId) return null;
+    const { getPortalSaveSeq, withPortalSaveSeq } = await import('./portal-save-seq');
+    const incomingSaveSeq = getPortalSaveSeq(upcomingOrder);
     const serviceType = (upcomingOrder?.serviceType || 'Food') as ServiceType;
-    const stored =
-        toStoredUpcomingOrder(upcomingOrder, serviceType) ?? upcomingOrder ?? {};
+    let stored: Record<string, unknown> =
+        (toStoredUpcomingOrder(upcomingOrder, serviceType) as Record<string, unknown> | null) ??
+        (upcomingOrder as Record<string, unknown>) ??
+        {};
+    if (incomingSaveSeq > 0) {
+        stored = withPortalSaveSeq(stored, incomingSaveSeq);
+    }
     const { data, error } = await supabase
         .from('clients')
         .update({
@@ -9377,6 +9323,19 @@ export async function updateClientUpcomingOrder(
         console.error('[updateClientUpcomingOrder]', error);
         throw new Error(error.message);
     }
+    if (!options?.skipOrderHistory) {
+        // Admin saves currently have no rich history append in demo-food; nothing to do here.
+    } else if (options?.syncHistoryIfChanged) {
+        try {
+            const { syncOrderHistoryIfStale } = await import('./portal-v2-server-actions');
+            await syncOrderHistoryIfStale(clientId, stored, {
+                portalSession: options.portalSessionHistory === true,
+                savedFrom: options.savedFrom ?? 'portal',
+            });
+        } catch (historyError) {
+            console.warn('[updateClientUpcomingOrder] Error syncing order history:', historyError);
+        }
+    }
     if (!options?.skipRevalidation) {
         try {
             revalidatePath('/clients');
@@ -9386,7 +9345,26 @@ export async function updateClientUpcomingOrder(
             /* ignore */
         }
     }
-    return data ? mapClientFromDB(data) : null;
+    if (!data) return null;
+    const mapped = mapClientFromDB(data);
+    const rawSeq = getPortalSaveSeq((data as { upcoming_order?: unknown }).upcoming_order);
+    if (rawSeq > 0) {
+        // Preserve save token on both aliases — ClassicInterface checks upcomingOrder;
+        // mapClientFromDB hydrates from upcoming_order into activeOrder (and strips unknown keys).
+        if (mapped.activeOrder && typeof mapped.activeOrder === 'object') {
+            mapped.activeOrder = withPortalSaveSeq(
+                mapped.activeOrder as unknown as Record<string, unknown>,
+                rawSeq,
+            ) as unknown as typeof mapped.activeOrder;
+        }
+        mapped.upcomingOrder = withPortalSaveSeq(
+            (mapped.upcomingOrder ?? mapped.activeOrder ?? {}) as unknown as Record<string, unknown>,
+            rawSeq,
+        ) as unknown as typeof mapped.upcomingOrder;
+    } else if (!mapped.upcomingOrder && mapped.activeOrder) {
+        mapped.upcomingOrder = mapped.activeOrder;
+    }
+    return mapped;
 }
 
 /**
@@ -10474,7 +10452,7 @@ export async function getOrdersByServiceType(serviceType: string) {
     }
 }
 
-async function processVendorOrderDetails(order: any, vendorId: string, isUpcoming: boolean, dbClient?: any) {
+export async function processVendorOrderDetails(order: any, vendorId: string, isUpcoming: boolean, dbClient?: any) {
     const client = dbClient ?? supabase;
     const orderIdField = isUpcoming ? 'upcoming_order_id' : 'order_id';
     const vendorSelectionsTable = isUpcoming ? 'upcoming_order_vendor_selections' : 'order_vendor_selections';

@@ -5,7 +5,6 @@ import styles from './page.module.css';
 
 /** New filename avoids stale browser / CDN cache from the old Mario image. */
 const DELIVERY_HERO = '/images/login-meal-delivery.jpg';
-const POEL_LOGO = '/images/poel-logo.png';
 
 export function LoginShell({ children }: { children: React.ReactNode }) {
     return (
@@ -22,7 +21,7 @@ export function LoginShell({ children }: { children: React.ReactNode }) {
                     />
                     <div className={styles.mobileHeroOverlay} />
                     <p className={styles.mobileHeroCaption}>
-                        Poel AI demo for the SCN program — client meals, routes &amp; billing
+                        SCN program demo — client meals, routes &amp; billing
                     </p>
                 </div>
 
@@ -37,7 +36,7 @@ export function LoginShell({ children }: { children: React.ReactNode }) {
                         />
                         <div>
                             <p className={styles.formBrandName}>{APP_BRAND_NAME}</p>
-                            <p className={styles.formBrandSub}>Poel AI · SCN demo</p>
+                            <p className={styles.formBrandSub}>SCN program demo</p>
                         </div>
                     </div>
                     <div className={styles.mobileBrand}>
@@ -50,7 +49,7 @@ export function LoginShell({ children }: { children: React.ReactNode }) {
                         />
                         <div>
                             <p className={styles.mobileBrandName}>{APP_BRAND_NAME}</p>
-                            <p className={styles.mobileBrandSub}>Poel AI · SCN demo</p>
+                            <p className={styles.mobileBrandSub}>SCN program demo</p>
                         </div>
                     </div>
                     {children}
@@ -58,16 +57,6 @@ export function LoginShell({ children }: { children: React.ReactNode }) {
                         <span className={styles.formFooterLine}>
                             <Lock size={13} strokeWidth={2} />
                             Protected by secure authentication
-                        </span>
-                        <span className={styles.formFooterPoel}>
-                            Demo by
-                            <Image
-                                src={POEL_LOGO}
-                                alt="Poel AI"
-                                width={52}
-                                height={58}
-                                className={styles.formFooterPoelLogo}
-                            />
                         </span>
                     </p>
                 </div>
@@ -90,16 +79,6 @@ export function LoginShell({ children }: { children: React.ReactNode }) {
 
                 <div className={styles.brandInner}>
                     <div className={styles.brandHeader}>
-                        <div className={styles.poelLogoWrap}>
-                            <Image
-                                src={POEL_LOGO}
-                                alt="Poel AI"
-                                width={88}
-                                height={99}
-                                priority
-                                className={styles.poelLogo}
-                            />
-                        </div>
                         <div className={styles.brandBadge}>SCN program demo</div>
                     </div>
 
@@ -145,14 +124,6 @@ export function LoginShell({ children }: { children: React.ReactNode }) {
                     </div>
 
                     <div className={styles.brandFooter}>
-                        <Image
-                            src={POEL_LOGO}
-                            alt=""
-                            width={40}
-                            height={45}
-                            className={styles.brandFooterLogo}
-                            aria-hidden
-                        />
                         <span>
                             Interactive demo by <strong>Poel AI</strong> for the SCN program · Sample data
                             only

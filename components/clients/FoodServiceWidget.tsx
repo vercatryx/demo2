@@ -1,13 +1,141 @@
 'use client';
 
-import React from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { ClientProfile, Vendor, MenuItem, MealCategory, MealItem } from '@/lib/types';
-import { isMeetingMinimum, isMeetingExactTarget, getItemPoints } from '@/lib/utils';
+import { isMeetingMinimum, isMeetingExactTarget, isExceedingMaximum, getItemPoints } from '@/lib/utils';
 import { Plus, Trash2, Calendar, Check, AlertTriangle, MessageSquare, Info, ChevronRight } from 'lucide-react';
-import { calculateVendorEffectiveDate } from '@/lib/order-dates';
+import { calculateVendorEffectiveDate, sortWeekdays } from '@/lib/order-dates';
 import TextareaAutosize from 'react-textarea-autosize';
+import {
+    buildFoodCatalogSearchHits,
+    filterFoodCatalogSearchHits,
+    type FoodCatalogSearchHit,
+} from '@/lib/food-catalog-search';
+import {
+    getItemQtyInVendorSelection,
+    getSelectedFoodItemIdsFromOrderConfig,
+    shouldShowFoodItemToViewer,
+} from '@/lib/food-item-phaseout';
 import styles from './ClientProfile.module.css';
-import MenuItemCard from './MenuItemCard';
+import MenuItemCard, { PORTAL_INCREMENT_BLOCKED_MESSAGE } from './MenuItemCard';
+
+function mergeDeliveryDayOrdersToVendorSelections(config: any): any[] {
+    let existingSelections = config.vendorSelections ? [...config.vendorSelections] : [];
+    if (existingSelections.length === 0 && config.deliveryDayOrders && typeof config.deliveryDayOrders === 'object') {
+        const vendorMap = new Map<string, any>();
+        for (const day of sortWeekdays(Object.keys(config.deliveryDayOrders))) {
+            const dayOrder = config.deliveryDayOrders[day];
+            const daySelections = dayOrder?.vendorSelections || [];
+            for (const sel of daySelections) {
+                if (!sel.vendorId) continue;
+                if (!vendorMap.has(sel.vendorId)) {
+                    vendorMap.set(sel.vendorId, {
+                        vendorId: sel.vendorId,
+                        selectedDeliveryDays: [],
+                        itemsByDay: {},
+                        itemNotesByDay: {},
+                    });
+                }
+                const v = vendorMap.get(sel.vendorId)!;
+                if (!v.selectedDeliveryDays.includes(day)) v.selectedDeliveryDays.push(day);
+                v.itemsByDay[day] = sel.items || {};
+                if (!v.itemNotesByDay) v.itemNotesByDay = {};
+                v.itemNotesByDay[day] = sel.itemNotes || {};
+            }
+        }
+        existingSelections = Array.from(vendorMap.values());
+    }
+    return existingSelections;
+}
+
+/** Flatten deliveryDayOrders into vendorSelections while preserving empty placeholder blocks. */
+function normalizeConfigForVendorEditing(config: any): any {
+    const newConfig = { ...config };
+    let selections = (config.vendorSelections || []).map((s: any) => ({ ...s }));
+
+    if (config.deliveryDayOrders && typeof config.deliveryDayOrders === 'object') {
+        for (const day of sortWeekdays(Object.keys(config.deliveryDayOrders))) {
+            const daySelections = config.deliveryDayOrders[day]?.vendorSelections || [];
+            for (const sel of daySelections) {
+                if (!sel?.vendorId) continue;
+                let idx = selections.findIndex((s: any) => s.vendorId === sel.vendorId);
+                if (idx < 0) {
+                    selections.push({
+                        vendorId: sel.vendorId,
+                        selectedDeliveryDays: [day],
+                        itemsByDay: { [day]: sel.items || {} },
+                        itemNotesByDay: { [day]: sel.itemNotes || {} },
+                        items: {},
+                        itemNotes: {},
+                    });
+                } else {
+                    const block = { ...selections[idx] };
+                    const days = [...(block.selectedDeliveryDays || [])];
+                    if (!days.includes(day)) days.push(day);
+                    block.selectedDeliveryDays = days;
+                    block.itemsByDay = { ...(block.itemsByDay || {}), [day]: sel.items || {} };
+                    block.itemNotesByDay = { ...(block.itemNotesByDay || {}), [day]: sel.itemNotes || {} };
+                    selections[idx] = block;
+                }
+            }
+        }
+        delete newConfig.deliveryDayOrders;
+    }
+
+    newConfig.vendorSelections = selections;
+    return newConfig;
+}
+
+function createVendorSelectionPatch(vendors: Vendor[], vendorId: string, existing?: any): any {
+    const vendor = vendors.find((v) => v.id === vendorId);
+    const autoSelectDay = vendor?.deliveryDays?.length === 1 ? vendor.deliveryDays[0] : null;
+    const vendorChanged = !existing?.vendorId || existing.vendorId !== vendorId;
+
+    return {
+        ...existing,
+        vendorId,
+        items: vendorChanged ? {} : (existing?.items || {}),
+        itemsByDay: vendorChanged
+            ? (autoSelectDay ? { [autoSelectDay]: {} } : {})
+            : (existing?.itemsByDay || (autoSelectDay ? { [autoSelectDay]: existing?.items || {} } : {})),
+        itemNotes: vendorChanged ? {} : (existing?.itemNotes || {}),
+        itemNotesByDay: vendorChanged ? {} : (existing?.itemNotesByDay || {}),
+        selectedDeliveryDays: vendorChanged
+            ? (autoSelectDay ? [autoSelectDay] : [])
+            : (existing?.selectedDeliveryDays || (autoSelectDay ? [autoSelectDay] : [])),
+    };
+}
+
+function vendorBlockNeedsDeliveryDays(vendors: Vendor[], selection: any): boolean {
+    const vendor = vendors.find((v) => v.id === selection?.vendorId);
+    const hasMultipleDays = (vendor?.deliveryDays?.length ?? 0) > 1;
+    const selectedDays = selection?.selectedDeliveryDays || [];
+    return hasMultipleDays && selectedDays.length === 0;
+}
+
+/** Find or create a vendor block index; does not set vendorId (use handleVendorSelectionChange for that). */
+function resolveVendorBlockForSearch(
+    config: any,
+    targetVendorId: string,
+): { nextConfig: any; vendorIndex: number } {
+    const normalized = normalizeConfigForVendorEditing(config);
+    let selections = [...(normalized.vendorSelections || [])];
+
+    let vendorIndex = selections.findIndex((s: any) => s.vendorId === targetVendorId);
+    if (vendorIndex < 0) {
+        const emptyIndex = selections.findIndex((s: any) => !s?.vendorId);
+        if (emptyIndex >= 0) {
+            vendorIndex = emptyIndex;
+        } else {
+            vendorIndex = selections.length;
+            selections.push({ vendorId: '', items: {} });
+        }
+    }
+
+    normalized.vendorSelections = selections;
+    return { nextConfig: normalized, vendorIndex };
+}
 
 interface Props {
     orderConfig: any;
@@ -19,6 +147,8 @@ interface Props {
     mealItems: MealItem[];
     settings?: any; // AppSettings for take effect date
     isClientPortal?: boolean;
+    /** When true, phaseout items are hidden unless already on the client's order. */
+    hidePhaseoutUnlessOnOrder?: boolean;
     allowVendorSelection?: boolean;
     /** When provided (e.g. from client portal), use this instead of client.serviceType for UI. Order's type is source of truth. */
     serviceType?: string;
@@ -39,6 +169,7 @@ export default function FoodServiceWidget({
     mealItems,
     settings,
     isClientPortal,
+    hidePhaseoutUnlessOnOrder = isClientPortal === true,
     allowVendorSelection: allowVendorSelectionProp,
     serviceType: effectiveServiceType,
     validationStatus
@@ -121,9 +252,21 @@ export default function FoodServiceWidget({
     }
 
     /** Filter vendor items to only those allowed on the given day (or all if no day). */
-    function getVendorMenuItemsForDay(vendorId: string, day: string | null): MenuItem[] {
+    function getVendorMenuItemsForDay(
+        vendorId: string,
+        day: string | null,
+        selection?: any,
+    ): MenuItem[] {
         const list = menuItems
-            .filter(i => i.vendorId === vendorId && i.isActive)
+            .filter(i => {
+                if (i.vendorId !== vendorId) return false;
+                const qty = selection ? getItemQtyInVendorSelection(selection, i.id, day) : 0;
+                return shouldShowFoodItemToViewer(i, {
+                    hidePhaseoutUnlessOnOrder,
+                    existingQty: qty,
+                    itemKind: 'menu',
+                });
+            })
             .sort((a, b) => {
                 const sortOrderA = a.sortOrder ?? 0;
                 const sortOrderB = b.sortOrder ?? 0;
@@ -134,15 +277,8 @@ export default function FoodServiceWidget({
         return list.filter(i => isItemAllowedOnDay(i, day));
     }
 
-    function getVendorMenuItems(vendorId: string) {
-        return menuItems
-            .filter(i => i.vendorId === vendorId && i.isActive)
-            .sort((a, b) => {
-                const sortOrderA = a.sortOrder ?? 0;
-                const sortOrderB = b.sortOrder ?? 0;
-                if (sortOrderA !== sortOrderB) return sortOrderA - sortOrderB;
-                return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
-            });
+    function getVendorMenuItems(vendorId: string, selection?: any, day: string | null = null) {
+        return getVendorMenuItemsForDay(vendorId, day, selection);
     }
 
     function getVendorSelectionsForDay(day: string | null): any[] {
@@ -210,12 +346,7 @@ export default function FoodServiceWidget({
         }, 0);
     }
 
-    function getTotalMealCountAllDays(): number {
-        // PREFER PASSED VALIDATION STATUS if available
-        if (validationStatus) {
-            return validationStatus.totalValue;
-        }
-
+    function computeLiveMealTotal(): number {
         let total = 0;
         const countedItemIdsGlobally = new Set<string>();
 
@@ -270,24 +401,49 @@ export default function FoodServiceWidget({
         return total;
     }
 
-    // --- MEAL SELECTION HANDLERS ---
-
-    function handleAddMeal(mealType: string) {
-        setOrderConfig((prev: any) => {
-            const newConfig = { ...prev };
-            if (!newConfig.mealSelections) newConfig.mealSelections = {};
-
-            // Create a unique key for this meal selection instance
-            const uniqueKey = `${mealType}_${Date.now()}`;
-
-            newConfig.mealSelections[uniqueKey] = {
-                mealType, // Store the original meal type for filtering/labels
-                vendorId: '', // User can select optional vendor
-                items: {}
-            };
-            return newConfig;
-        });
+    function getTotalMealCountAllDays(): number {
+        // Limit checks must use live orderConfig — validationStatus can lag one render behind edits.
+        return computeLiveMealTotal();
     }
+
+    function getSingleIncrementPointCost(
+        item: MenuItem | MealItem,
+        selection?: any,
+        day?: string,
+    ): number {
+        const points = getItemPoints(item);
+        if (day && selection?.itemsByDay) {
+            return points;
+        }
+        if (selection && selection.items !== undefined && !selection.itemsByDay) {
+            const daysCount =
+                selection.selectedDeliveryDays?.length > 0
+                    ? selection.selectedDeliveryDays.length
+                    : (client as any).delivery_days?.length || 1;
+            return points * daysCount;
+        }
+        return points;
+    }
+
+    function wouldAddingPointsExceedLimit(additionalPoints: number): boolean {
+        const limit = client.approvedMealsPerWeek || 0;
+        if (limit <= 0) return false;
+        if (serviceType !== 'Food' && serviceType !== 'Meal') return false;
+        if (additionalPoints <= 0) return false;
+        return isExceedingMaximum(getTotalMealCountAllDays() + additionalPoints, limit);
+    }
+
+    function canIncrementItem(item: MenuItem | MealItem, selection?: any, day?: string): boolean {
+        return !wouldAddingPointsExceedLimit(getSingleIncrementPointCost(item, selection, day));
+    }
+
+    const [limitBlockedNoticeOpen, setLimitBlockedNoticeOpen] = useState(false);
+
+    const notifyIncrementBlocked = useCallback(() => {
+        setLimitBlockedNoticeOpen(true);
+    }, []);
+
+    // --- MEAL SELECTION HANDLERS ---
 
     function handleRemoveMeal(uniqueKey: string) {
         setOrderConfig((prev: any) => {
@@ -318,6 +474,15 @@ export default function FoodServiceWidget({
     }
 
     function handleMealItemChange(uniqueKey: string, itemId: string, qty: number, note?: string) {
+        const currentQty = Number(orderConfig.mealSelections?.[uniqueKey]?.items?.[itemId] || 0);
+        if (isClientPortal && qty > currentQty) {
+            const item = mealItems.find((i) => i.id === itemId);
+            if (item) {
+                const addedUnits = qty - currentQty;
+                const cost = getSingleIncrementPointCost(item) * addedUnits;
+                if (wouldAddingPointsExceedLimit(cost)) return;
+            }
+        }
         setOrderConfig((prev: any) => {
             const newConfig = { ...prev };
             if (newConfig.mealSelections && newConfig.mealSelections[uniqueKey]) {
@@ -351,33 +516,9 @@ export default function FoodServiceWidget({
     function handleAddVendorBlock() {
         setOrderConfig((prev: any) => {
             const newConfig = { ...prev };
-            // Merge with existing: if we have deliveryDayOrders but no vendorSelections, convert first so we don't lose data
-            let existingSelections = newConfig.vendorSelections ? [...newConfig.vendorSelections] : [];
-            if (existingSelections.length === 0 && newConfig.deliveryDayOrders && typeof newConfig.deliveryDayOrders === 'object') {
-                const vendorMap = new Map<string, any>();
-                for (const day of Object.keys(newConfig.deliveryDayOrders).sort()) {
-                    const dayOrder = newConfig.deliveryDayOrders[day];
-                    const daySelections = dayOrder?.vendorSelections || [];
-                    for (const sel of daySelections) {
-                        if (!sel.vendorId) continue;
-                        if (!vendorMap.has(sel.vendorId)) {
-                            vendorMap.set(sel.vendorId, {
-                                vendorId: sel.vendorId,
-                                selectedDeliveryDays: [],
-                                itemsByDay: {},
-                                itemNotesByDay: {}
-                            });
-                        }
-                        const v = vendorMap.get(sel.vendorId)!;
-                        if (!v.selectedDeliveryDays.includes(day)) v.selectedDeliveryDays.push(day);
-                        v.itemsByDay[day] = sel.items || {};
-                        v.itemNotesByDay[day] = sel.itemNotes || {};
-                    }
-                }
-                existingSelections = Array.from(vendorMap.values());
-            }
+            const existingSelections = mergeDeliveryDayOrdersToVendorSelections(newConfig);
             newConfig.vendorSelections = [...existingSelections, { vendorId: '', items: {} }];
-            delete newConfig.deliveryDayOrders; // Use vendorSelections as single source of truth after edit
+            delete newConfig.deliveryDayOrders;
             return newConfig;
         });
     }
@@ -396,37 +537,32 @@ export default function FoodServiceWidget({
 
     function handleVendorSelectionChange(index: number, vendorId: string) {
         setOrderConfig((prev: any) => {
-            const newConfig = { ...prev };
-            if (newConfig.vendorSelections) {
-                const updated = [...newConfig.vendorSelections];
-                const existing = updated[index];
-                const previousVendorId = existing?.vendorId;
-                // Only clear items when vendor actually changed — preserves items when re-selecting same vendor
-                const vendorChanged = previousVendorId !== vendorId;
-
-                const vendor = vendors.find(v => v.id === vendorId);
-                const autoSelectDay = (vendor?.deliveryDays?.length === 1) ? vendor.deliveryDays[0] : null;
-
-                updated[index] = {
-                    ...updated[index],
-                    vendorId,
-                    items: vendorChanged ? {} : (existing?.items || {}),
-                    itemsByDay: vendorChanged
-                        ? (autoSelectDay ? { [autoSelectDay]: {} } : {})
-                        : (existing?.itemsByDay || (autoSelectDay ? { [autoSelectDay]: existing?.items || {} } : {})),
-                    itemNotes: vendorChanged ? {} : (existing?.itemNotes || {}),
-                    itemNotesByDay: vendorChanged ? {} : (existing?.itemNotesByDay || {}),
-                    selectedDeliveryDays: vendorChanged
-                        ? (autoSelectDay ? [autoSelectDay] : [])
-                        : (existing?.selectedDeliveryDays || (autoSelectDay ? [autoSelectDay] : []))
-                };
-                newConfig.vendorSelections = updated;
+            const newConfig = normalizeConfigForVendorEditing(prev);
+            const updated = [...(newConfig.vendorSelections || [])];
+            while (updated.length <= index) {
+                updated.push({ vendorId: '', items: {} });
             }
+            updated[index] = createVendorSelectionPatch(vendors, vendorId, updated[index]);
+            newConfig.vendorSelections = updated;
             return newConfig;
         });
     }
 
     function handleVendorItemChange(blockIndex: number, itemId: string, qty: number, day?: string, note?: string) {
+        const block = orderConfig.vendorSelections?.[blockIndex];
+        const currentQty = (() => {
+            if (!block) return 0;
+            if (day && block.itemsByDay?.[day]) return block.itemsByDay[day][itemId] || 0;
+            return block.items?.[itemId] || 0;
+        })();
+        if (isClientPortal && qty > currentQty) {
+            const item = menuItems.find((i) => i.id === itemId);
+            if (item) {
+                const addedUnits = qty - currentQty;
+                const cost = getSingleIncrementPointCost(item, block, day) * addedUnits;
+                if (wouldAddingPointsExceedLimit(cost)) return;
+            }
+        }
 
         setOrderConfig((prev: any) => {
             const newConfig = { ...prev };
@@ -434,14 +570,15 @@ export default function FoodServiceWidget({
                 const updated = [...newConfig.vendorSelections];
                 const block = { ...updated[blockIndex] };
 
-                // Handle multi-day format (itemsByDay)
+                // Handle multi-day format (itemsByDay) — mirror notes to flat map too
+                // so refresh/read paths that prefer one map don't drop dropdown picks.
                 if (day && block.selectedDeliveryDays && block.selectedDeliveryDays.length > 0) {
                     if (!block.itemsByDay) block.itemsByDay = {};
                     if (!block.itemsByDay[day]) block.itemsByDay[day] = {};
 
-                    // Ensure itemNotesByDay initialization
                     if (!block.itemNotesByDay) block.itemNotesByDay = {};
                     if (!block.itemNotesByDay[day]) block.itemNotesByDay[day] = {};
+                    const itemNotes = { ...(block.itemNotes || {}) };
 
                     if (qty > 0) {
                         block.itemsByDay[day][itemId] = qty;
@@ -449,14 +586,18 @@ export default function FoodServiceWidget({
                         if (note !== undefined) {
                             if (note.trim() === '') {
                                 delete block.itemNotesByDay[day][itemId];
+                                delete itemNotes[itemId];
                             } else {
                                 block.itemNotesByDay[day][itemId] = note;
+                                itemNotes[itemId] = note;
                             }
                         }
                     } else {
                         delete block.itemsByDay[day][itemId];
-                        delete block.itemNotesByDay[day][itemId]; // Clean up note if item removed
+                        delete block.itemNotesByDay[day][itemId];
+                        delete itemNotes[itemId];
                     }
+                    block.itemNotes = itemNotes;
                 } else {
                     // Handle single-day format (items)
                     const items = { ...block.items };
@@ -520,7 +661,7 @@ export default function FoodServiceWidget({
                 } else {
                     // Add day
                     block.selectedDeliveryDays.push(day);
-                    block.selectedDeliveryDays.sort(); // Sort makes UI consistent
+                    block.selectedDeliveryDays = sortWeekdays(block.selectedDeliveryDays);
 
                     // Initialize itemsByDay structure
                     if (!block.itemsByDay) {
@@ -553,6 +694,15 @@ export default function FoodServiceWidget({
     
     // State to track which shelf is open (vendor index or meal uniqueKey)
     const [openShelf, setOpenShelf] = React.useState<string | null>(null);
+
+    const [foodSearchQuery, setFoodSearchQuery] = useState('');
+    const [foodSearchOpen, setFoodSearchOpen] = useState(false);
+    const [foodSearchError, setFoodSearchError] = useState<string | null>(null);
+    const [foodSearchWarning, setFoodSearchWarning] = useState<string | null>(null);
+    const [pendingScrollItemId, setPendingScrollItemId] = useState<string | null>(null);
+    const [pendingScrollDeliveryDay, setPendingScrollDeliveryDay] = useState<string | null>(null);
+    const [highlightedFoodItemId, setHighlightedFoodItemId] = useState<string | null>(null);
+    const foodSearchRef = useRef<HTMLDivElement>(null);
     
     // Helper to generate shelf ID
     const getVendorShelfId = (index: number) => `vendor-${index}`;
@@ -566,37 +716,267 @@ export default function FoodServiceWidget({
         setOpenShelf(openShelf === shelfId ? null : shelfId);
     };
 
-    /** Resolved vendor list for display: use vendorSelections if present, else build from deliveryDayOrders so food orders show when only deliveryDayOrders is stored. */
+    /** Resolved vendor list for display: prefer vendorSelections; fall back to deliveryDayOrders merge. */
     const getResolvedVendorSelections = (): any[] => {
         if (orderConfig.vendorSelections && orderConfig.vendorSelections.length > 0) {
             return orderConfig.vendorSelections;
         }
-        if (orderConfig.deliveryDayOrders && typeof orderConfig.deliveryDayOrders === 'object') {
-            const deliveryDays = Object.keys(orderConfig.deliveryDayOrders).sort();
-            const vendorMap = new Map<string, any>();
-            for (const day of deliveryDays) {
-                const daySelections = orderConfig.deliveryDayOrders[day].vendorSelections || [];
-                for (const sel of daySelections) {
-                    if (!sel.vendorId) continue;
-                    if (!vendorMap.has(sel.vendorId)) {
-                        vendorMap.set(sel.vendorId, {
-                            vendorId: sel.vendorId,
-                            selectedDeliveryDays: [],
-                            itemsByDay: {},
-                            itemNotesByDay: {}
-                        });
-                    }
-                    const vendorSel = vendorMap.get(sel.vendorId);
-                    if (!vendorSel.selectedDeliveryDays.includes(day)) vendorSel.selectedDeliveryDays.push(day);
-                    vendorSel.itemsByDay[day] = sel.items || {};
-                    if (!vendorSel.itemNotesByDay) vendorSel.itemNotesByDay = {};
-                    vendorSel.itemNotesByDay[day] = sel.itemNotes || {};
-                }
-            }
-            if (vendorMap.size > 0) return Array.from(vendorMap.values());
-        }
+        const merged = mergeDeliveryDayOrdersToVendorSelections(orderConfig);
+        if (merged.length > 0) return merged;
         return orderConfig.vendorSelections || [];
     };
+
+    const showFoodCatalogSearch = serviceType === 'Food' || serviceType === 'Meal';
+
+    const selectedFoodItemIds = useMemo(
+        () => getSelectedFoodItemIdsFromOrderConfig(orderConfig),
+        [orderConfig],
+    );
+
+    const foodCatalogSearchHits = useMemo(
+        () => (
+            showFoodCatalogSearch
+                ? buildFoodCatalogSearchHits(menuItems, vendors, {
+                    hidePhaseoutUnlessOnOrder,
+                    selectedItemIds: selectedFoodItemIds,
+                })
+                : []
+        ),
+        [showFoodCatalogSearch, menuItems, vendors, hidePhaseoutUnlessOnOrder, selectedFoodItemIds],
+    );
+
+    const foodCatalogSearchResults = useMemo(
+        () => filterFoodCatalogSearchHits(foodCatalogSearchHits, foodSearchQuery),
+        [foodCatalogSearchHits, foodSearchQuery],
+    );
+
+    const navigateToSearchHit = useCallback(
+        (hit: FoodCatalogSearchHit, vendorIndex: number, selection: any) => {
+            setOpenShelf(getVendorShelfId(vendorIndex));
+            const vendor = vendors.find((v) => v.id === hit.vendorId);
+            const vendorName = vendor?.name ?? 'Kitchen facility';
+            if (vendorBlockNeedsDeliveryDays(vendors, selection)) {
+                setFoodSearchWarning(
+                    `Select at least one delivery day for ${vendorName} to view this item.`,
+                );
+                setPendingScrollDeliveryDay(null);
+                setPendingScrollItemId(hit.itemId);
+                return;
+            }
+            setFoodSearchWarning(null);
+            setPendingScrollItemId(hit.itemId);
+        },
+        [vendors],
+    );
+
+    const applyFoodSearchHit = (hit: FoodCatalogSearchHit) => {
+        setFoodSearchQuery('');
+        setFoodSearchOpen(false);
+        setFoodSearchError(null);
+        setFoodSearchWarning(null);
+        setPendingScrollDeliveryDay(null);
+
+        if (!allowVendorSelection) {
+            const selections = getResolvedVendorSelections();
+            const existingIndex = selections.findIndex((s: any) => s.vendorId === hit.vendorId);
+            if (existingIndex < 0) {
+                setFoodSearchError(`This item isn't in your order's menu sections.`);
+                return;
+            }
+            navigateToSearchHit(hit, existingIndex, selections[existingIndex]);
+            return;
+        }
+
+        const resolved = resolveVendorBlockForSearch(orderConfig, hit.vendorId);
+        const existingSelection = resolved.nextConfig.vendorSelections?.[resolved.vendorIndex];
+        const alreadyHadVendor = existingSelection?.vendorId === hit.vendorId;
+        const vendor = vendors.find((v) => v.id === hit.vendorId);
+        const vendorName = vendor?.name ?? 'Kitchen facility';
+
+        let vendorIndex = resolved.vendorIndex;
+
+        // Step 1: ensure block exists (reuse empty slot or existing vendor block).
+        flushSync(() => {
+            setOrderConfig(resolved.nextConfig);
+        });
+
+        // Step 2: same code path as picking from the <select> dropdown.
+        flushSync(() => {
+            handleVendorSelectionChange(vendorIndex, hit.vendorId);
+        });
+
+        const needsDeliveryDays = alreadyHadVendor
+            ? vendorBlockNeedsDeliveryDays(vendors, existingSelection)
+            : (vendor?.deliveryDays?.length ?? 0) > 1;
+
+        setOpenShelf(getVendorShelfId(vendorIndex));
+        if (needsDeliveryDays) {
+            setFoodSearchWarning(
+                `Select at least one delivery day for ${vendorName} to view this item.`,
+            );
+            setPendingScrollDeliveryDay(null);
+            setPendingScrollItemId(hit.itemId);
+            return;
+        }
+        setFoodSearchWarning(null);
+        setPendingScrollItemId(hit.itemId);
+    };
+
+    useEffect(() => {
+        if (!foodSearchOpen) return;
+        const onDocPointer = (e: MouseEvent) => {
+            if (!foodSearchRef.current?.contains(e.target as Node)) {
+                setFoodSearchOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', onDocPointer);
+        return () => document.removeEventListener('mousedown', onDocPointer);
+    }, [foodSearchOpen]);
+
+    useEffect(() => {
+        if (!pendingScrollItemId || pendingScrollDeliveryDay) return;
+
+        const item = menuItems.find((m) => m.id === pendingScrollItemId);
+        if (!item?.vendorId) return;
+
+        const selections = getResolvedVendorSelections();
+        const selection = selections.find((s: any) => s.vendorId === item.vendorId);
+        if (!selection) return;
+
+        const vendor = vendors.find((v) => v.id === item.vendorId);
+        const hasMultipleDays = (vendor?.deliveryDays?.length ?? 0) > 1;
+        if (!hasMultipleDays) return;
+
+        const selectedDays: string[] = selection.selectedDeliveryDays || [];
+        if (selectedDays.length === 0) return;
+
+        const visibleDays = selectedDays.filter((d) => isItemAllowedOnDay(item, d));
+        if (visibleDays.length === 0) return;
+
+        setPendingScrollDeliveryDay(visibleDays[visibleDays.length - 1]);
+    }, [
+        pendingScrollItemId,
+        pendingScrollDeliveryDay,
+        orderConfig.vendorSelections,
+        orderConfig.deliveryDayOrders,
+        menuItems,
+        vendors,
+    ]);
+
+    useEffect(() => {
+        if (!pendingScrollItemId) return;
+        const timer = window.setTimeout(() => {
+            const daySelector = pendingScrollDeliveryDay
+                ? `[data-food-item-id="${pendingScrollItemId}"][data-delivery-day="${pendingScrollDeliveryDay}"]`
+                : `[data-food-item-id="${pendingScrollItemId}"]`;
+            let el = document.querySelector(daySelector);
+            if (!el && pendingScrollDeliveryDay) {
+                el = document.querySelector(`[data-food-item-id="${pendingScrollItemId}"]`);
+            }
+            if (!el) return;
+
+            el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            setHighlightedFoodItemId(pendingScrollItemId);
+            setPendingScrollItemId(null);
+            setPendingScrollDeliveryDay(null);
+            setFoodSearchWarning(null);
+        }, 200);
+        return () => window.clearTimeout(timer);
+    }, [
+        pendingScrollItemId,
+        pendingScrollDeliveryDay,
+        openShelf,
+        orderConfig.vendorSelections,
+        orderConfig.deliveryDayOrders,
+    ]);
+
+    useEffect(() => {
+        if (!highlightedFoodItemId) return;
+        const timer = window.setTimeout(() => setHighlightedFoodItemId(null), 3000);
+        return () => window.clearTimeout(timer);
+    }, [highlightedFoodItemId]);
+
+    const renderFoodSearchHitLabel = (hit: FoodCatalogSearchHit) => {
+        if (hit.itemNumber == null) return hit.label;
+        const prefix = `Item#${hit.itemNumber}`;
+        if (!hit.label.startsWith(prefix)) return hit.label;
+        const rest = hit.label.slice(prefix.length);
+        return (
+            <>
+                <span className={styles.foodCatalogSearchItemNumber}>Item #{hit.itemNumber}</span>
+                {rest}
+            </>
+        );
+    };
+
+    const renderFoodCatalogSearch = () => (
+        <div ref={foodSearchRef} className={styles.foodCatalogSearch}>
+            <label className="sr-only" htmlFor="food-catalog-search">
+                Search food items by name or item number
+            </label>
+            <input
+                id="food-catalog-search"
+                type="search"
+                className={styles.foodCatalogSearchInput}
+                placeholder="Search by Item # or name…"
+                value={foodSearchQuery}
+                autoComplete="off"
+                onChange={(e) => {
+                    setFoodSearchQuery(e.target.value);
+                    setFoodSearchOpen(true);
+                    setFoodSearchError(null);
+                    setFoodSearchWarning(null);
+                }}
+                onFocus={() => {
+                    if (foodSearchQuery.trim()) setFoodSearchOpen(true);
+                }}
+                onKeyDown={(e) => {
+                    if (e.key === 'Escape') {
+                        setFoodSearchOpen(false);
+                        return;
+                    }
+                    if (e.key === 'Enter' && foodCatalogSearchResults[0]) {
+                        e.preventDefault();
+                        applyFoodSearchHit(foodCatalogSearchResults[0]);
+                    }
+                }}
+            />
+            {foodSearchOpen && foodSearchQuery.trim() ? (
+                <ul className={styles.foodCatalogSearchResults} role="listbox">
+                    {foodCatalogSearchResults.length === 0 ? (
+                        <li className={styles.foodCatalogSearchEmpty} role="option">
+                            No matching items
+                        </li>
+                    ) : (
+                        foodCatalogSearchResults.map((hit) => (
+                            <li key={hit.itemId}>
+                                <button
+                                    type="button"
+                                    role="option"
+                                    className={styles.foodCatalogSearchOption}
+                                    onClick={() => applyFoodSearchHit(hit)}
+                                >
+                                    <span className={styles.foodCatalogSearchOptionKind}>Item</span>
+                                    {renderFoodSearchHitLabel(hit)}
+                                </button>
+                            </li>
+                        ))
+                    )}
+                </ul>
+            ) : null}
+            {foodSearchError ? (
+                <p className={styles.foodCatalogSearchError} role="alert">
+                    {foodSearchError}
+                </p>
+            ) : null}
+            {foodSearchWarning ? (
+                <p className={styles.foodCatalogSearchWarning} role="status">
+                    <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 2 }} aria-hidden />
+                    {foodSearchWarning}
+                </p>
+            ) : null}
+        </div>
+    );
 
     const renderVendorBlocks = () => {
         const selections = getResolvedVendorSelections();
@@ -607,19 +987,19 @@ export default function FoodServiceWidget({
                 {selections.map((selection: any, index: number) => {
                     const vendorId = selection.vendorId;
                     const vendor = vendors.find(v => v.id === vendorId);
-                    const vendorItems = vendorId ? getVendorMenuItems(vendorId) : [];
+                    const vendorItems = vendorId ? getVendorMenuItems(vendorId, selection) : [];
 
                     // Calculate vendor meal count
                     const vendorMealCount = getVendorMealCount(vendorId, selection);
                     const vendorMinimum = vendor?.minimumMeals || 0;
                     const meetsMinimum = vendorMinimum === 0 || isMeetingMinimum(vendorMealCount, vendorMinimum);
 
-                    // Get vendor's delivery days
-                    const vendorDeliveryDays = vendor?.deliveryDays || [];
+                    // Get vendor's delivery days (always Monday → Sunday for display)
+                    const vendorDeliveryDays = sortWeekdays(vendor?.deliveryDays || []);
                     const hasMultipleDays = vendorDeliveryDays.length > 1;
 
                     // Check if multi-day mode is active for this vendor
-                    const selectedDays = selection.selectedDeliveryDays || [];
+                    const selectedDays = sortWeekdays(selection.selectedDeliveryDays || []);
                     
                     // Calculate summary info and get selected items (hide items not allowed on any selected/implied day)
                     const selectedItemsForSummary = (() => {
@@ -718,7 +1098,7 @@ export default function FoodServiceWidget({
                                             fontSize: '0.8rem', 
                                             color: meetsMinimum ? 'var(--color-success)' : 'var(--color-danger)',
                                             padding: '2px 8px',
-                                            backgroundColor: meetsMinimum ? '#eff6ff' : '#fee2e2',
+                                            backgroundColor: meetsMinimum ? '#d1fae5' : '#fee2e2',
                                             borderRadius: '4px',
                                             display: 'flex',
                                             alignItems: 'center',
@@ -764,7 +1144,7 @@ export default function FoodServiceWidget({
                                     )}
                                 </div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                    {vendor && allowVendorSelection && (
+                                    {allowVendorSelection && (
                                         <button 
                                             className={`${styles.iconBtn} ${styles.danger}`} 
                                             onClick={(e) => {
@@ -772,6 +1152,7 @@ export default function FoodServiceWidget({
                                                 handleRemoveVendorBlock(index);
                                             }}
                                             style={{ padding: '4px 8px' }}
+                                            aria-label="Remove kitchen facilities"
                                         >
                                             <Trash2 size={16} />
                                         </button>
@@ -797,6 +1178,7 @@ export default function FoodServiceWidget({
                                         <div style={{ marginBottom: '16px' }}>
                                             <label className="label" style={{ marginBottom: '8px' }}>{facilityUi.sectionLabel}</label>
                                             <select
+                                                key={`vendor-select-${index}-${vendorId || 'empty'}`}
                                                 className="input"
                                                 value={vendorId || ''}
                                                 onChange={(e) => handleVendorSelectionChange(index, e.target.value)}
@@ -804,6 +1186,7 @@ export default function FoodServiceWidget({
                                                 <option value="">{facilityUi.selectPlaceholder}</option>
                                                 {vendors
                                                     .filter(v => {
+                                                        if (v.id === vendorId) return true;
                                                         if (!v.serviceTypes.includes('Food') || !v.isActive) return false;
 
                                                         // Feature: Filter by Client Location (if assigned)
@@ -882,7 +1265,7 @@ export default function FoodServiceWidget({
                                         ) : selectedDays.length > 0 ? (
                                             // Multi-day view - show STACKED menu blocks for each selected day (hide items not allowed on that day)
                                             selectedDays.map((day: string) => {
-                                                const visibleItems = getVendorMenuItemsForDay(vendorId, day);
+                                                const visibleItems = getVendorMenuItemsForDay(vendorId, day, selection);
 
                                                 return (
                                                     <div key={day} className="animate-in fade-in slide-in-from-top-1 duration-200" style={{
@@ -912,8 +1295,8 @@ export default function FoodServiceWidget({
                                                                         gap: '6px',
                                                                         padding: '4px 8px',
                                                                         borderRadius: '6px',
-                                                                        backgroundColor: dayMet ? '#eff6ff' : '#fee2e2',
-                                                                        color: dayMet ? '#1d4ed8' : '#991b1b',
+                                                                        backgroundColor: dayMet ? '#d1fae5' : '#fee2e2',
+                                                                        color: dayMet ? '#065f46' : '#991b1b',
                                                                         fontSize: '0.85rem',
                                                                         fontWeight: 600
                                                                     }}>
@@ -924,7 +1307,7 @@ export default function FoodServiceWidget({
                                                             })()}
                                                         </div>
 
-                                                        <div className={styles.menuItemsGrid} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '10px' }}>
+                                                        <div className={styles.menuItemsGrid} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '10px' }}>
                                                             {visibleItems.map(item => {
                                                                 const dayItems = selection.itemsByDay?.[day] || {};
                                                                 const qty = dayItems[item.id] || 0;
@@ -937,6 +1320,11 @@ export default function FoodServiceWidget({
                                                                         item={item}
                                                                         quantity={qty}
                                                                         note={note}
+                                                                        deliveryDay={day}
+                                                                        searchHighlighted={highlightedFoodItemId === item.id}
+                                                                        incrementDisabled={!canIncrementItem(item, selection, day)}
+                                                                        onIncrementBlocked={isClientPortal ? notifyIncrementBlocked : undefined}
+                                                                        hidePhaseoutUnlessOnOrder={hidePhaseoutUnlessOnOrder}
                                                                         onQuantityChange={(newQty) => handleVendorItemChange(index, item.id, newQty, day)}
                                                                         onNoteChange={(newNote) => handleVendorItemChange(index, item.id, qty, day, newNote)}
                                                                     />
@@ -955,9 +1343,9 @@ export default function FoodServiceWidget({
                                                         marginBottom: '1rem',
                                                         padding: '8px 12px',
                                                         borderRadius: '6px',
-                                                        backgroundColor: meetsMinimum ? '#eff6ff' : '#fee2e2',
-                                                        color: meetsMinimum ? '#1d4ed8' : '#991b1b',
-                                                        border: `1px solid ${meetsMinimum ? '#2563eb' : '#ef4444'}`,
+                                                        backgroundColor: meetsMinimum ? '#d1fae5' : '#fee2e2',
+                                                        color: meetsMinimum ? '#065f46' : '#991b1b',
+                                                        border: `1px solid ${meetsMinimum ? '#10b981' : '#ef4444'}`,
                                                         display: 'flex',
                                                         alignItems: 'center',
                                                         gap: '8px',
@@ -968,7 +1356,7 @@ export default function FoodServiceWidget({
                                                         <span>Minimum: {vendorMinimum} meals | Selected: {vendorMealCount} meals</span>
                                                     </div>
                                                 )}
-                                                <div className={styles.menuItemsGrid} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '16px' }}>
+                                                <div className={styles.menuItemsGrid} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '16px' }}>
                                                     {(() => {
                                                         // Filter for Flat View: hide items not allowed on the implied day(s)
                                                         let impliedDays: string[] = [];
@@ -997,6 +1385,10 @@ export default function FoodServiceWidget({
                                                                     item={item}
                                                                     quantity={qty}
                                                                     note={note}
+                                                                    searchHighlighted={highlightedFoodItemId === item.id}
+                                                                    incrementDisabled={!canIncrementItem(item, selection)}
+                                                                    onIncrementBlocked={isClientPortal ? notifyIncrementBlocked : undefined}
+                                                                    hidePhaseoutUnlessOnOrder={hidePhaseoutUnlessOnOrder}
                                                                     onQuantityChange={(newQty) => handleVendorItemChange(index, item.id, newQty)}
                                                                     onNoteChange={(newNote) => handleVendorItemChange(index, item.id, qty, undefined, newNote)}
                                                                 />
@@ -1208,8 +1600,12 @@ export default function FoodServiceWidget({
                             const catItems = mealItems
                                 .filter(i => {
                                     if (i.categoryId !== subCat.id) return false;
-                                    if (i.isActive !== false) return true;
-                                    return Number(config.items?.[i.id] || 0) > 0;
+                                    const qty = Number(config.items?.[i.id] || 0);
+                                    return shouldShowFoodItemToViewer(i, {
+                                        hidePhaseoutUnlessOnOrder,
+                                        existingQty: qty,
+                                        itemKind: 'meal',
+                                    });
                                 })
                                 .sort((a, b) => {
                                     const sortOrderA = a.sortOrder ?? 0;
@@ -1271,6 +1667,9 @@ export default function FoodServiceWidget({
                                                     item={item}
                                                     quantity={qty}
                                                     note={config.itemNotes?.[item.id] || ''}
+                                                    incrementDisabled={!canIncrementItem(item)}
+                                                    onIncrementBlocked={isClientPortal ? notifyIncrementBlocked : undefined}
+                                                    hidePhaseoutUnlessOnOrder={hidePhaseoutUnlessOnOrder}
                                                     onQuantityChange={(newQty) => handleMealItemChange(uniqueKey, item.id, newQty)}
                                                     onNoteChange={(newNote) => handleMealItemChange(uniqueKey, item.id, qty, newNote)}
                                                     contextLabel={mealType}
@@ -1287,7 +1686,11 @@ export default function FoodServiceWidget({
                                 if (!cat || cat.mealType !== mealType) return false;
                                 const qty = Number(config.items?.[i.id] || 0);
                                 if (cat.isActive === false && qty <= 0) return false;
-                                return i.isActive !== false || qty > 0;
+                                return shouldShowFoodItemToViewer(i, {
+                                    hidePhaseoutUnlessOnOrder,
+                                    existingQty: qty,
+                                    itemKind: 'meal',
+                                });
                             }).length === 0 && (
                                 <span className={styles.hint}>No items found for {mealType}.</span>
                             )}
@@ -1385,36 +1788,6 @@ export default function FoodServiceWidget({
                                 <Plus size={16} /> {isClientPortal ? 'Add Kitchen Facilities' : 'Add Vendor'}
                             </button>
                         )}
-                        {/* Add Meal Buttons */}
-                        {(() => {
-                            const availableMealTypes = mealCategories
-                                .map(c => c.mealType)
-                                .filter((val, idx, arr) => arr.indexOf(val) === idx);
-
-                            return availableMealTypes.map(type => (
-                                <button
-                                    key={type}
-                                    type="button"
-                                    onClick={() => handleAddMeal(type)}
-                                    className="btn"
-                                    style={{
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '8px',
-                                        backgroundColor: '#fbbf24',
-                                        border: 'none',
-                                        color: 'black',
-                                        fontWeight: 600,
-                                        padding: '8px 16px',
-                                        borderRadius: '8px',
-                                        boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-                                        fontSize: '0.9rem'
-                                    }}
-                                >
-                                    <Plus size={16} /> Add {type}
-                                </button>
-                            ));
-                        })()}
                     </div>
 
 
@@ -1499,7 +1872,7 @@ export default function FoodServiceWidget({
             )}
 
             {/* Generic Vendor Blocks (Main/Lunch) */}
-            {/* Generic Vendor Blocks (Main/Lunch) */}
+            {showFoodCatalogSearch && renderFoodCatalogSearch()}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1rem' }}>
                 {renderVendorBlocks()}
             </div>
@@ -1509,8 +1882,43 @@ export default function FoodServiceWidget({
             {/* Meal blocks are now the primary UI */}
             {renderMealBlocks()}
 
-
-
+            {limitBlockedNoticeOpen && (
+                <div
+                    className={styles.modalOverlay}
+                    style={{ zIndex: 1100 }}
+                    onClick={() => setLimitBlockedNoticeOpen(false)}
+                >
+                    <div
+                        className={styles.modalContent}
+                        style={{
+                            maxWidth: '420px',
+                            height: 'auto',
+                            padding: '24px',
+                            textAlign: 'center',
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <AlertTriangle
+                            size={40}
+                            style={{ color: 'var(--color-warning, #d97706)', marginBottom: '12px' }}
+                            aria-hidden
+                        />
+                        <h2 style={{ fontSize: '1.125rem', fontWeight: 600, marginBottom: '8px' }}>
+                            Weekly limit reached
+                        </h2>
+                        <p style={{ color: 'var(--text-secondary)', marginBottom: '20px', lineHeight: 1.5 }}>
+                            {PORTAL_INCREMENT_BLOCKED_MESSAGE}
+                        </p>
+                        <button
+                            type="button"
+                            className="btn btn-primary"
+                            onClick={() => setLimitBlockedNoticeOpen(false)}
+                        >
+                            OK
+                        </button>
+                    </div>
+                </div>
+            )}
 
         </div >
     );

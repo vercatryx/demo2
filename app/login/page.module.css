@@ -65,27 +65,9 @@
 .brandHeader {
     display: flex;
     align-items: flex-start;
-    justify-content: space-between;
+    justify-content: flex-end;
     gap: 1rem;
     flex-wrap: wrap;
-}
-
-.poelLogoWrap {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0.5rem 0.75rem;
-    border-radius: 0.875rem;
-    background: rgba(15, 23, 42, 0.72);
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    box-shadow: 0 12px 32px rgba(15, 23, 42, 0.28);
-    backdrop-filter: blur(14px);
-}
-
-.poelLogo {
-    display: block;
-    width: auto;
-    height: 3.25rem;
 }
 
 .brandBadge {
@@ -186,13 +168,6 @@
     font-size: 0.8125rem;
     line-height: 1.5;
     color: rgba(255, 255, 255, 0.72);
-}
-
-.brandFooterLogo {
-    flex-shrink: 0;
-    width: auto;
-    height: 2rem;
-    opacity: 0.95;
 }
 
 .brandFooter strong {
@@ -631,21 +606,6 @@
     display: inline-flex;
     align-items: center;
     gap: 0.375rem;
-}
-
-.formFooterPoel {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.375rem;
-    font-size: 0.6875rem;
-    font-weight: 500;
-    color: var(--text-tertiary);
-}
-
-.formFooterPoelLogo {
-    width: auto;
-    height: 1.375rem;
-    display: block;
 }
 
 .backLinkWrap {

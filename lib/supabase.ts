@@ -69,6 +69,17 @@ try {
     console.error('[supabase] ❌ Invalid Supabase URL format:', supabaseUrl);
 }
 
+/** Shared client options for one-off service-role clients built elsewhere (e.g. portal server actions). */
+export const supabaseClientOptions = {
+    auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+    },
+    db: {
+        schema: 'public' as const,
+    },
+};
+
 export const supabase = createClient(supabaseUrl, supabaseClientKey, {
     auth: {
         autoRefreshToken: false,

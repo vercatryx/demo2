@@ -11,6 +11,12 @@ import {
   getMealCategories,
   getMealItems,
 } from '@/lib/actions';
+import { getClientFacingOrderHistoryForPortal } from '@/lib/actions-read';
+import {
+  getSwitchableClientAccounts,
+  getHouseholdOrderMembersForPortal,
+} from '@/lib/client-portal-account-switch';
+import { isPortalV2ClientAllowlisted } from '@/lib/portal-v2-access';
 import { ClientPortalClassicInterface } from '@/components/clients/ClientPortalClassicInterface';
 import { StaffClientPortalStatusAcknowledgement } from '@/components/clients/StaffClientPortalStatusAcknowledgement';
 import { getSession } from '@/lib/session';
@@ -97,6 +103,7 @@ export default async function ClientPortalTrianglePage({ params }: Props) {
     activeOrder,
     mealCategories,
     mealItemsRaw,
+    recentOrders,
   ] = await Promise.all([
     getPublicClient(id),
     getStatuses(),
@@ -109,6 +116,7 @@ export default async function ClientPortalTrianglePage({ params }: Props) {
     getActiveOrderForClient(id),
     getMealCategories(),
     getMealItems(),
+    getClientFacingOrderHistoryForPortal(id, 30),
   ]);
 
   const menuItems = menuItemsRaw ?? [];
@@ -146,6 +154,17 @@ export default async function ClientPortalTrianglePage({ params }: Props) {
     session.role === 'admin' ||
     session.role === 'super-admin';
 
+  const isClientPortalSession = session.role === 'client';
+  const switchableAccounts = await getSwitchableClientAccounts(
+    isClientPortalSession ? session.userId : id,
+  );
+  const householdOrderMembers = await getHouseholdOrderMembersForPortal(
+    id,
+    client.serviceType,
+    switchableAccounts,
+  );
+  const portalV2Allowlisted = isPortalV2ClientAllowlisted(id);
+
   const portalInterface = (
     <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       {session.role !== 'client' ? (
@@ -159,7 +178,7 @@ export default async function ClientPortalTrianglePage({ params }: Props) {
             background: 'var(--bg-surface)',
           }}
         >
-          Classic portal (upcoming-order / vendor selection)
+          Food / Boxes portal (upcoming-order · Portal v2)
         </div>
       ) : null}
       <div style={{ flex: 1, minHeight: 0 }}>
@@ -179,6 +198,12 @@ export default async function ClientPortalTrianglePage({ params }: Props) {
         mealOrder={null}
         boxOrders={[]}
         canManageFoodKitchenVendor={canManageFoodKitchenVendor}
+        hidePhaseoutUnlessOnOrder={true}
+        switchableAccounts={switchableAccounts}
+        householdOrderMembers={householdOrderMembers}
+        isClientPortalSession={isClientPortalSession}
+        portalV2Allowlisted={portalV2Allowlisted}
+        recentOrders={recentOrders}
       />
       </div>
     </div>

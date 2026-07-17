@@ -8,6 +8,8 @@ interface EmailOptions {
     subject: string;
     html: string;
     text?: string;
+    /** Ignored in this demo build (email is disabled) — accepted so callers type-check. */
+    attachments?: { filename: string; content: string; contentType?: string }[];
 }
 
 export async function sendEmail(

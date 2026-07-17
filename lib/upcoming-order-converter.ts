@@ -391,6 +391,22 @@ export function normalizeUpcomingOrder(raw: UpcomingOrderRaw | null | undefined)
 }
 
 /**
+ * Shape fixes on upcoming_order JSON only (client-side use).
+ * - deliveryDayOrders merged into vendorSelections (via normalizeUpcomingOrder)
+ * - legacy Meal tag → Food
+ */
+export function normalizeUpcomingOrderJson(
+    raw: UpcomingOrderRaw | null | undefined,
+): UpcomingOrderRaw | null {
+    const order = normalizeUpcomingOrder(raw);
+    if (!order || typeof order !== 'object') return order ?? null;
+    if (order.serviceType === 'Meal') {
+        return { ...order, serviceType: 'Food' };
+    }
+    return order;
+}
+
+/**
  * Returns true if the payload is in legacy shape (has deliveryDayOrders with content).
  * Useful for migration scripts to count how many need conversion.
  */

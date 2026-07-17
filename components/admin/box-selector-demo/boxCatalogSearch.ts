@@ -80,15 +80,22 @@ export function buildBoxCatalogSearchHits(
     menuItems: MenuItem[],
     layoutConfig: DemoBoxLayoutConfig | null,
     vendorId: string | undefined,
+    options?: {
+        hidePhaseoutUnlessOnOrder?: boolean;
+        boxItems?: Record<string, number>;
+    },
 ): BoxCatalogSearchHit[] {
     const hits: BoxCatalogSearchHit[] = [];
+    const hidePhaseout = options?.hidePhaseoutUnlessOnOrder === true;
+    const boxItems = options?.boxItems ?? {};
 
     const itemsForCategory = (categoryId: string) =>
         menuItems.filter(
             (i) =>
                 i.isActive !== false &&
                 i.categoryId === categoryId &&
-                ((i.vendorId == null || i.vendorId === '') || i.vendorId === vendorId),
+                ((i.vendorId == null || i.vendorId === '') || i.vendorId === vendorId) &&
+                (!hidePhaseout || i.phaseout !== true || (boxItems[i.id] ?? 0) > 0),
         );
 
     for (const cat of sortedCategories) {
