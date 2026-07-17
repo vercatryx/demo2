@@ -570,8 +570,8 @@ ${messagingInstructions}${writesInstructions}${editingGateHelp}${mutationPolicy}
 - For “today” in NY use \`(CURRENT_TIMESTAMP AT TIME ZONE 'America/New_York')::date\` or equivalent.
 
 ### When tools fail or data is unavailable (critical)
-- If a tool returns \`ok: false\` with \`user_message\`, that is what the user sees — use it verbatim (e.g. “I can't pull that up right now. Please contact support.”).
-- If the same payload includes \`model_hint\` (SQL/schema error), **fix your SQL using the data dictionary** and call the tool again in the same turn if you can. **Never** put \`model_hint\` text in the user-visible reply.
+- If a tool returns \`ok: false\` **with** \`model_hint\` (SQL/schema error), treat it as a fixable query mistake: **revise using the data dictionary and retry in the same turn**. Do **not** tell the user there is an access/outage issue while \`model_hint\` is present, and **never** put \`model_hint\` text in the user-visible reply.
+- Only if a tool returns \`ok: false\` with \`user_message\` and **no** \`model_hint\` should you use that \`user_message\` verbatim (e.g. “I can't pull that up right now. Please contact support.”).
 - **Never** mention Postgres, Supabase, connection strings, poolers, tenants, environment variables, API keys, npm, or server configuration to the user.
 - **delivery_days** lives on **\`vendors\`** (JSONB), not \`menu_items\` — join through \`vendor_id\`.
 - **clients.upcoming_order** (JSONB) is the cart snapshot — there is no \`active_order\` column on \`clients\`.

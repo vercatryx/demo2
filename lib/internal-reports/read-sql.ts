@@ -85,10 +85,11 @@ async function runReadonlySelectWithLimit(
         };
     } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
-        if (msg !== DATA_COPILOT_SUPPORT_MESSAGE) {
-            console.error('[internal-reports] SQL query failed:', msg);
-        }
-        throw new Error(DATA_COPILOT_SUPPORT_MESSAGE);
+        // Preserve the real Postgres/SQL error so toolUnavailablePayload can attach
+        // model_hint for silent retries. Never rewrite to the support message here —
+        // that made every schema/syntax miss look like permanent "access down".
+        console.error('[internal-reports] SQL query failed:', msg);
+        throw e instanceof Error ? e : new Error(msg);
     } finally {
         await sqlCon.end({ timeout: 5 }).catch(() => undefined);
     }
