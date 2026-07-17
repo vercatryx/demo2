@@ -424,7 +424,6 @@ async function collectIdentityMatches(identifier: string): Promise<{
     const normalizedInput = normalizeEmail(identifier);
     const matches: IdentityMatch[] = [];
 
-    const envUser = getEnvAdminUsername();
     const normForAdmin = normalizeAdminUsername(originalTrimmed);
     if (isEnvSuperAdminUsername(originalTrimmed)) {
         matches.push({ type: 'admin' });
