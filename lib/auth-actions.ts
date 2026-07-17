@@ -35,15 +35,29 @@ function generateOtp() {
     return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
+/** Demo fallback when Vercel env vars were never set (scn.demo.poel.ai). */
+const DEMO_ADMIN_FALLBACK_USERNAME = 'admin';
+const DEMO_ADMIN_FALLBACK_PASSWORD = '12345';
+
+function shouldUseDemoAdminFallback(): boolean {
+    // This repo is the SCN demo app. When Vercel has no ADMIN_* vars, still allow admin/12345.
+    if (process.env.DISABLE_DEMO_ADMIN_FALLBACK === '1') return false;
+    return true;
+}
+
 /** Env super-admin credentials (supports ADMIN_* and ENV_ADMIN_* names). */
 function getEnvAdminUsername(): string | undefined {
     const v = process.env.ADMIN_USERNAME || process.env.ENV_ADMIN_USERNAME;
-    return v?.trim() || undefined;
+    if (v?.trim()) return v.trim();
+    if (shouldUseDemoAdminFallback()) return DEMO_ADMIN_FALLBACK_USERNAME;
+    return undefined;
 }
 
 function getEnvAdminPassword(): string | undefined {
     const v = process.env.ADMIN_PASSWORD || process.env.ENV_ADMIN_PASSWORD;
-    return v?.trim() || undefined;
+    if (v?.trim()) return v.trim();
+    if (shouldUseDemoAdminFallback()) return DEMO_ADMIN_FALLBACK_PASSWORD;
+    return undefined;
 }
 
 function isEnvSuperAdminLogin(loginInput: string, password: string): boolean {
@@ -399,12 +413,17 @@ async function collectIdentityMatches(identifier: string): Promise<{
         matches.push({ type: 'admin' });
     }
 
-    const { data: admins, error: adminsError } = await requireAdminsDb().from('admins').select('id, username');
-    if (adminsError) {
-        console.error('[collectIdentityMatches] Error querying admins:', adminsError);
-    } else if (admins && admins.length > 0) {
-        const adminMatches = admins.filter((a) => a.username && normalizeAdminUsername(a.username) === normForAdmin);
-        matches.push(...adminMatches.map((a) => ({ type: 'admin' as const, id: a.id })));
+    try {
+        const { data: admins, error: adminsError } = await requireAdminsDb().from('admins').select('id, username');
+        if (adminsError) {
+            console.error('[collectIdentityMatches] Error querying admins:', adminsError);
+        } else if (admins && admins.length > 0) {
+            const adminMatches = admins.filter((a) => a.username && normalizeAdminUsername(a.username) === normForAdmin);
+            matches.push(...adminMatches.map((a) => ({ type: 'admin' as const, id: a.id })));
+        }
+    } catch (err) {
+        // Missing service key / DB misconfig must not block env super-admin identity.
+        console.error('[collectIdentityMatches] Admins lookup unavailable:', err);
     }
 
     const { data: vendorsData, error: vendorsError } = await supabase
