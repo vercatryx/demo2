@@ -862,14 +862,27 @@ body {
     box-shadow: var(--shadow-sm);
 }
 
-.btn-submit:hover:not(:disabled) {
+.btn-submit:hover:not(:disabled):not([aria-disabled="true"]) {
     background-color: var(--color-primary-hover);
 }
 
-.btn-submit:disabled {
+.btn-submit:disabled,
+.btn-submit[aria-disabled="true"],
+.btn-submit.btn-submit-blocked {
     background-color: var(--text-tertiary);
     cursor: not-allowed;
     transform: none;
+}
+
+@keyframes field-missing-flash {
+    0%, 100% { box-shadow: 0 0 0 0 transparent; }
+    25%, 75% { box-shadow: 0 0 0 3px rgba(196, 92, 38, 0.45); }
+}
+
+.field-missing-target {
+    outline: 2px solid rgba(196, 92, 38, 0.85);
+    outline-offset: 2px;
+    animation: field-missing-flash 1.2s ease;
 }
 
 .btn-settings {

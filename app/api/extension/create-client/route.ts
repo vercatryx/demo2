@@ -262,7 +262,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({
                 success: false,
                 error:
-                    'caseId must be the full Unite Us URL from the address bar while viewing the client\'s open case contact page (format: https://app.uniteus.io/dashboard/cases/open/<case-uuid>/contact/<contact-uuid>). Short links or other Unite pages are not accepted.',
+                    'caseId must be the full Unite Us URL from the address bar while viewing the client\'s open case contact page (format: https://app.uniteus.io/dashboard/cases/open/<case-id>/contact/<contact-id>). Short links or other Unite pages are not accepted.',
             }, { status: 400 });
         }
 

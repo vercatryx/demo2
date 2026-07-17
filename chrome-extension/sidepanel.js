@@ -4,9 +4,9 @@ const DEFAULT_BASE = 'https://scn.demo.poel.ai';
 /** Set to `true` to always use Unite “Brooklyn” and the light blue theme (hides the Unite dropdown). */
 const BROOKLYN_ONLY = false;
 
-/** Explains the exact Unite Us pattern when the pasted URL does not match `isValidCaseUrl`. */
+/** Explains the Unite Us path shape when the pasted URL does not match `isValidCaseUrl`. */
 const CASE_URL_INCORRECT_HINT =
-    'case URL — paste the full link from the address bar while you have the client\'s open case loaded in Unite Us. It must match this shape: https://app.uniteus.io/dashboard/cases/open/<case-uuid>/contact/<contact-uuid> (not a short link or a different Unite page).';
+    'case URL — paste the full link from the address bar while you have the client\'s open case loaded in Unite Us. It must match this shape: https://app.uniteus.io/dashboard/cases/open/<case-id>/contact/<contact-id> (not a short link or a different Unite page).';
 
 let config = { baseUrl: DEFAULT_BASE, apiKey: '' };
 let statuses = [];
@@ -314,19 +314,60 @@ function applyBrooklynOnlyUi() {
 
 /** Labels for required-field gaps shown next to the submit buttons. */
 function getSubmitMissingReasons() {
+    return getSubmitMissingItems().map((item) => item.reason);
+}
+
+/** Required-field gaps with the control to focus for each. */
+function getSubmitMissingItems() {
     const missing = [];
-    const fullName = document.getElementById('full-name')?.value.trim() ?? '';
-    const street = document.getElementById('address')?.value.trim() ?? '';
-    const caseUrl = document.getElementById('case-url')?.value.trim() ?? '';
+    const fullNameEl = document.getElementById('full-name');
+    const streetEl = document.getElementById('address');
+    const caseUrlEl = document.getElementById('case-url');
+    const uniteEl = document.getElementById('unite-account');
+    const fullName = fullNameEl?.value.trim() ?? '';
+    const street = streetEl?.value.trim() ?? '';
+    const caseUrl = caseUrlEl?.value.trim() ?? '';
     const unite = getUniteAccountValue();
 
-    if (!fullName) missing.push('full name');
-    if (!street) missing.push('street address');
-    if (unite !== 'Regular' && unite !== 'Brooklyn') missing.push('Unite account');
-    if (!caseUrl) missing.push('case link');
-    else if (!isValidCaseUrl(caseUrl)) missing.push(CASE_URL_INCORRECT_HINT);
+    if (!fullName) missing.push({ reason: 'full name', el: fullNameEl });
+    if (!street) missing.push({ reason: 'street address', el: streetEl });
+    if (unite !== 'Regular' && unite !== 'Brooklyn') {
+        missing.push({ reason: 'Unite account', el: uniteEl });
+    }
+    if (!caseUrl) missing.push({ reason: 'case link', el: caseUrlEl });
+    else if (!isValidCaseUrl(caseUrl)) {
+        missing.push({ reason: CASE_URL_INCORRECT_HINT, el: caseUrlEl });
+    }
 
     return missing;
+}
+
+/** Scroll to and focus the first required field that is still missing. */
+function focusFirstMissingSubmitField() {
+    const items = getSubmitMissingItems();
+    const el = items.find((item) => item.el)?.el;
+    if (!el) return;
+
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    try {
+        el.focus({ preventScroll: true });
+    } catch (_) {
+        el.focus();
+    }
+    el.classList.remove('field-missing-target');
+    // Retrigger CSS flash if the same field is still missing on a later click.
+    void el.offsetWidth;
+    el.classList.add('field-missing-target');
+    window.setTimeout(() => el.classList.remove('field-missing-target'), 1600);
+}
+
+/** Gray out Submit without using HTML disabled (so clicks can jump to missing fields). */
+function setSubmitBlocked(blocked) {
+    const submitBtn = document.getElementById('submit-btn');
+    if (!submitBtn) return;
+    submitBtn.disabled = false;
+    submitBtn.setAttribute('aria-disabled', blocked ? 'true' : 'false');
+    submitBtn.classList.toggle('btn-submit-blocked', blocked);
 }
 
 // Initialize
@@ -1189,13 +1230,18 @@ async function handleSubmit(e) {
     e.preventDefault();
 
     const formEl = document.getElementById('client-form');
-    if (!formEl._validateForm || !formEl._validateForm()) {
+    // Always re-scan; if anything is missing, jump to it and keep Submit grayed.
+    const ready = formEl._validateForm ? formEl._validateForm() : false;
+    if (!ready) {
+        focusFirstMissingSubmitField();
         return;
     }
 
     const submitBtn = document.getElementById('submit-btn');
     if (submitBtn) {
         submitBtn.disabled = true;
+        submitBtn.removeAttribute('aria-disabled');
+        submitBtn.classList.remove('btn-submit-blocked');
         submitBtn.textContent = 'Submitting...';
     }
 
@@ -1372,7 +1418,7 @@ async function handleSubmit(e) {
             document.getElementById('flag-complex').checked = false;
             document.getElementById('flag-bill').checked = true;
             document.getElementById('flag-delivery').checked = true;
-            // Re-validate form (will disable submit button)
+            // Re-validate form (will gray out submit until required fields are filled)
             setupFormValidation();
         } else {
             throw new Error(data.error || 'Failed to create client');
@@ -1510,26 +1556,25 @@ async function handleAutoFill() {
 }
 
 
-// Validate case URL format
+// Validate case URL format (path shape only — IDs need not be dashed UUIDs)
 function isValidCaseUrl(url) {
     if (!url || typeof url !== 'string') {
         return false;
     }
-    
-    // Expected format: https://app.uniteus.io/dashboard/cases/open/{uuid}/contact/{uuid}
-    const pattern = /^https:\/\/app\.uniteus\.io\/dashboard\/cases\/open\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/contact\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+    // https://app.uniteus.io/dashboard/cases/open/{caseId}/contact/{contactId}
+    const pattern = /^https:\/\/app\.uniteus\.io\/dashboard\/cases\/open\/[A-Za-z0-9_-]+\/contact\/[A-Za-z0-9_-]+\/?$/i;
     return pattern.test(url.trim());
 }
 
 function setupFormValidation() {
     const form = document.getElementById('client-form');
-    const submitBtn = document.getElementById('submit-btn');
     const readiness = document.getElementById('submit-readiness');
 
     function validateForm() {
         const missing = getSubmitMissingReasons();
         const ready = missing.length === 0;
-        if (submitBtn) submitBtn.disabled = !ready;
+        setSubmitBlocked(!ready);
         if (readiness) {
             readiness.textContent = ready
                 ? ''

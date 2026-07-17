@@ -13,13 +13,20 @@ export function formatDate(dateStr: string) {
     });
 }
 
+/** Non-empty case/contact id segment (UUID or shorter alphanumeric). */
+const UNITE_US_ID_SEGMENT = '[A-Za-z0-9_-]+';
+
 /**
- * Validates if a string is a valid UniteUs case URL
- * Pattern: https://app.uniteus.io/dashboard/cases/open/{case-uuid}/contact/{contact-uuid}
+ * Validates if a string is a valid UniteUs case URL.
+ * Requires the path shape only — IDs need not be dashed UUIDs.
+ * Pattern: https://app.uniteus.io/dashboard/cases/open/{caseId}/contact/{contactId}
  */
 export function isValidUniteUsUrl(url: string): boolean {
     if (!url || typeof url !== 'string') return false;
-    const caseUrlPattern = /^https:\/\/app\.uniteus\.io\/dashboard\/cases\/open\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/contact\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const caseUrlPattern = new RegExp(
+        `^https:\\/\\/app\\.uniteus\\.io\\/dashboard\\/cases\\/open\\/${UNITE_US_ID_SEGMENT}\\/contact\\/${UNITE_US_ID_SEGMENT}\\/?$`,
+        'i'
+    );
     return caseUrlPattern.test(url.trim());
 }
 
@@ -43,7 +50,7 @@ export function parseUniteUsUrl(urlStr: string | null | undefined): { caseId: st
     try {
         const u = new URL(String(urlStr));
         const path = u.pathname.replace(/\/+$/, '');
-        const m = /\/cases\/open\/([0-9a-fA-F-]{10,})\/contact\/([0-9a-fA-F-]{10,})/.exec(path);
+        const m = /\/cases\/open\/([A-Za-z0-9_-]+)\/contact\/([A-Za-z0-9_-]+)/.exec(path);
         if (!m) return null;
         const [, caseId, clientId] = m;
         return { caseId, clientId };
