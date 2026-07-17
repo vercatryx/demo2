@@ -235,20 +235,26 @@ export async function login(prevState: any, formData: FormData) {
     try {
         const loginNorm = normalizeAdminUsername(loginInput);
 
-        // 1. Check Env Super Admin
+        // 1. Check Env Super Admin / demo bootstrap (no DB required)
         if (isEnvSuperAdminLogin(loginInput, password)) {
             await createSession('super-admin', 'Admin', 'super-admin');
             redirect('/');
         }
 
         // 2. Check Database Admins (flexible username match)
-        const adminsDb = requireAdminsDb();
-        const { data: adminsList, error: adminsLoginError } = await adminsDb
-            .from('admins')
-            .select('id, username, password, name, role');
-
-        if (adminsLoginError) {
-            console.error('Login admin fetch:', adminsLoginError);
+        let adminsList: { id: string; username: string; password: string; name: string | null; role: string | null }[] | null = null;
+        try {
+            const adminsDb = requireAdminsDb();
+            const { data, error: adminsLoginError } = await adminsDb
+                .from('admins')
+                .select('id, username, password, name, role');
+            if (adminsLoginError) {
+                console.error('Login admin fetch:', adminsLoginError);
+            } else {
+                adminsList = data;
+            }
+        } catch (err) {
+            console.error('Login admin DB unavailable:', err);
         }
 
         const admin = adminsList?.find((a) => a.username && normalizeAdminUsername(a.username) === loginNorm);
