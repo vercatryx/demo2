@@ -618,7 +618,8 @@ export async function checkEmailIdentity(identifier: string) {
     // Env super-admin has no DB row — still allow password login on step 2.
     const envAdminMatch = matches.find((m) => m.type === 'admin' && !m.id);
     if (envAdminMatch && !matches.some((m) => m.type === 'admin' && m.id)) {
-        return { exists: true, type: 'admin' as const, id: undefined, enablePasswordless: false };
+        // Do not return `id: undefined` — Next server-action serialization can throw on it.
+        return { exists: true, type: 'admin' as const, enablePasswordless: false };
     }
 
     if (matches.length > 1) {
@@ -733,21 +734,38 @@ export type LoginIdentityResult = Awaited<ReturnType<typeof checkEmailIdentity>>
 export async function checkLoginIdentity(identifier: string): Promise<LoginIdentityResult> {
     const t = identifier.trim();
     if (!t) {
-        return { exists: false, type: null, enablePasswordless: false, otpStorageKey: undefined, otpChannel: undefined };
+        return { exists: false, type: null, enablePasswordless: false };
     }
-    const e164 = normalizePhone(t);
-    if (e164 && !t.includes('@')) {
-        return checkPhoneLoginIdentity(e164);
+
+    // Fast path: env / demo super-admin — no DB required (hosted demo often lacks ADMIN_* env).
+    const envUser = getEnvAdminUsername();
+    if (envUser && normalizeAdminUsername(t) === normalizeAdminUsername(envUser)) {
+        return { exists: true, type: 'admin', enablePasswordless: false };
     }
-    const r = await checkEmailIdentity(identifier);
-    if (!r.exists) {
-        return { ...r, otpStorageKey: undefined, otpChannel: undefined };
+
+    try {
+        const e164 = normalizePhone(t);
+        if (e164 && !t.includes('@')) {
+            return checkPhoneLoginIdentity(e164);
+        }
+        const r = await checkEmailIdentity(identifier);
+        if (!r.exists) {
+            return { ...r };
+        }
+        const otpStorageKey = normalizeEmail(identifier);
+        return {
+            ...r,
+            ...(otpStorageKey ? { otpStorageKey } : {}),
+            otpChannel: 'email',
+        };
+    } catch (err) {
+        console.error('[checkLoginIdentity]', err);
+        // Last resort: if this is the demo admin username, still allow password step.
+        if (envUser && normalizeAdminUsername(t) === normalizeAdminUsername(envUser)) {
+            return { exists: true, type: 'admin', enablePasswordless: false };
+        }
+        throw err;
     }
-    return {
-        ...r,
-        otpStorageKey: normalizeEmail(identifier) || undefined,
-        otpChannel: 'email',
-    };
 }
 
 export async function confirmLoginWithPick(pickToken: string, choice: { type: LoginAccountChoice['type']; id: string }) {
