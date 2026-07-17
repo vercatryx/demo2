@@ -6,6 +6,7 @@ import type { PortalHomeBlock, PortalHomePromoLinkTarget } from '@/lib/portal-ho
 import type { PortalHomeContentRow } from '@/lib/portal-home-layout';
 import { getInfoBlockBodyForMode } from '@/lib/portal-home-blocks';
 import type { ItemCategory, MenuItem, Vendor } from '@/lib/types';
+import { APP_BRAND_LOGO_PATH, APP_BRAND_NAME } from '@/lib/brand';
 import { PortalProductCard } from './PortalProductCard';
 import { PortalHomeBlocks } from './PortalHomeBlocks';
 import { PortalInfoInstructions } from './PortalInfoInstructions';
@@ -38,8 +39,8 @@ function PortalInfoBlock({ block, mode }: { block: PortalHomeBlock; mode: 'food'
                 <section className={styles.portalV2HomeInfoCard}>
                     <div className={styles.portalV2HomeInfoLogoWrap}>
                         <Image
-                            src="/mainLogo.jpg"
-                            alt="Triangle Square"
+                            src={APP_BRAND_LOGO_PATH}
+                            alt={APP_BRAND_NAME}
                             width={160}
                             height={160}
                             className={styles.portalV2HomeInfoLogo}

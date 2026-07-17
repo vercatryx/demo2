@@ -1,5 +1,7 @@
-/** Same asset as `components/Sidebar.tsx` and login — `next/image` src `/mainLogo.jpg`. */
-export const ADMIN_BRAND_LOGO_PATH = '/mainLogo.jpg';
+import { APP_BRAND_NAME, APP_BRAND_LOGO_PATH } from '@/lib/brand';
+
+/** Same asset as login / portal chrome — demo CFS mark (not Triangle Square). */
+export const ADMIN_BRAND_LOGO_PATH = APP_BRAND_LOGO_PATH;
 
 /**
  * Absolute base URL for `/public` assets in outgoing mail (images must be fully qualified).
@@ -80,7 +82,7 @@ export function buildBrandedEmailShell(opts: BrandedEmailShellOptions): string {
         </tr>
         <tr>
           <td style="padding:20px 36px;background-color:#f1f5f9;border-top:1px solid #e2e8f0;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.5;color:#64748b;text-align:center;">
-            Triangle Square · SCN Program · <a href="tel:+18459351870" style="color:#0c2340;text-decoration:none;">845-935-1870</a>
+            ${APP_BRAND_NAME} · <a href="tel:+18459351870" style="color:#0c2340;text-decoration:none;">845-935-1870</a>
           </td>
         </tr>
       </table>
@@ -102,5 +104,5 @@ export function brandedPhoneParagraph(): string {
 }
 
 export function brandedSignoff(): string {
-    return `<p style="margin:0 0 8px 0;color:#1e293b;">Thank you.</p><p style="margin:0;font-weight:bold;color:#0c2340;">The Triangle Square Team</p>`;
+    return `<p style="margin:0 0 8px 0;color:#1e293b;">Thank you.</p><p style="margin:0;font-weight:bold;color:#0c2340;">The ${APP_BRAND_NAME} Team</p>`;
 }

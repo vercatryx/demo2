@@ -8,6 +8,7 @@ import type { FoodMenuLayoutConfig } from '@/lib/food/food-menu-layout';
 import type { BoxMenuLayoutConfig } from '@/lib/boxes/box-catalog-order';
 import { sortBoxCategoriesForCatalog } from '@/lib/boxes/box-catalog-order';
 import { getBoxCategoryImageUrl } from '@/lib/boxes/box-category-images';
+import { APP_BRAND_LOGO_PATH } from '@/lib/brand';
 import { mergeDeliveryDayOrdersToVendorSelections } from '@/lib/portal-vendor-selection';
 import { getBoxCategorySidebarStatus } from '@/lib/portal-box-status';
 import { getVendorSidebarStatus } from '@/lib/portal-vendor-status';
@@ -93,7 +94,7 @@ export function PortalVendorSidebar({
 
     const departmentsWithHome: Dept[] = useMemo(
         () => [
-            { id: PORTAL_HOME_DEPARTMENT_ID, name: 'Home', imageUrl: '/mainLogo.jpg' },
+            { id: PORTAL_HOME_DEPARTMENT_ID, name: 'Home', imageUrl: APP_BRAND_LOGO_PATH },
             ...departments,
         ],
         [departments],

@@ -16,6 +16,7 @@ import type {
 } from '@/lib/types';
 import type { FoodMenuLayoutConfig } from '@/lib/food/food-menu-layout';
 import type { BoxMenuLayoutConfig } from '@/lib/boxes/box-catalog-order';
+import { APP_BRAND_LOGO_PATH, APP_BRAND_NAME } from '@/lib/brand';
 import { getFoodMenuLayoutConfig } from '@/lib/portal-v2-server-actions';
 import { getBoxMenuLayoutConfig } from '@/lib/merge-triangle-actions';
 import { sortBoxCategoriesForCatalog } from '@/lib/boxes/box-catalog-order';
@@ -1370,8 +1371,8 @@ function ClientPortalV2Inner({
                             aria-label="Home"
                         >
                             <Image
-                                src="/mainLogo.jpg"
-                                alt="Triangle Square"
+                                src={APP_BRAND_LOGO_PATH}
+                                alt={APP_BRAND_NAME}
                                 width={60}
                                 height={60}
                                 className={styles.portalV2BrandLogo}

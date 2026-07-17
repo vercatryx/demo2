@@ -63,7 +63,7 @@ export type PortalHomeBlock = {
     /** Info box: separate copy per portal (no headline on either) */
     infoBodyFood?: string;
     infoBodyBoxes?: string;
-    /** Info box: show Triangle Square logo above the Markdown body */
+    /** Info box: show brand logo above the Markdown body */
     infoShowLogo?: boolean;
     imageUrl?: string | null;
     imageLayout: PortalHomeBlockImageLayout;

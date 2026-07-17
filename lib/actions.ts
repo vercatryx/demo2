@@ -563,8 +563,16 @@ export async function deleteVendor(id: string) {
 
 export async function getMenuItems() {
     try {
-        const { data, error } = await supabase.from('menu_items').select('*');
-        if (error) return [];
+        const { fetchAllSupabaseRows } = await import('@/lib/supabase/fetch-all-rows');
+        const data = await fetchAllSupabaseRows((from, to) =>
+            supabase
+                .from('menu_items')
+                .select('*')
+                .order('sort_order', { ascending: true })
+                .order('name', { ascending: true })
+                .order('id', { ascending: true })
+                .range(from, to)
+        );
         return (data || []).map((i: any) => ({
             id: i.id,
             vendorId: i.vendor_id,
@@ -576,7 +584,8 @@ export async function getMenuItems() {
             quotaValue: i.quota_value,
             minimumOrder: i.minimum_order ?? 0,
             imageUrl: i.image_url || null,
-            sortOrder: i.sort_order ?? 0
+            sortOrder: i.sort_order ?? 0,
+            phaseout: i.phaseout === true,
         }));
     } catch (error) {
         console.error('Error fetching menu items:', error);
@@ -668,8 +677,16 @@ export async function updateMenuItemOrder(updates: { id: string; sortOrder: numb
 
 export async function getCategories() {
     try {
-        const { data, error } = await supabase.from('item_categories').select('*').order('sort_order', { ascending: true }).order('name');
-        if (error) return [];
+        const { fetchAllSupabaseRows } = await import('@/lib/supabase/fetch-all-rows');
+        const data = await fetchAllSupabaseRows((from, to) =>
+            supabase
+                .from('item_categories')
+                .select('*')
+                .order('sort_order', { ascending: true })
+                .order('name', { ascending: true })
+                .order('id', { ascending: true })
+                .range(from, to)
+        );
         return (data || []).map((c: any) => ({
             id: c.id,
             name: c.name,

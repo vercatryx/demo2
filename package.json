@@ -15,6 +15,7 @@
     "patch:demo-meal-plan": "npx tsx --env-file=.env.local scripts/patch-demo-meal-plan.ts",
     "seed:demo": "npx tsx --env-file=.env.local scripts/seed-demo.ts",
     "seed:demo:reset": "npx tsx --env-file=.env.local scripts/seed-demo.ts --reset",
+    "seed:box-catalog": "npx tsx --env-file=.env.local scripts/seed-box-catalog.ts",
     "seed:ai-usage": "npx tsx --env-file=.env.local scripts/seed-ai-usage.ts",
     "seed:admin": "npx tsx --env-file=.env.local scripts/seed-admin.ts",
     "compare:pitr": "npx tsx --env-file=.env.local scripts/compare-pitr-databases.ts",

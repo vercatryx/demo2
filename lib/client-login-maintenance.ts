@@ -2,7 +2,7 @@ import type { AppSettings } from './types';
 
 export const DEFAULT_CLIENT_LOGIN_MAINTENANCE_MESSAGE = `Our system is currently under maintenance. We hope to have it back up soon.
 
-In the meantime, please call 845-682-0558 or email Info@trianglesquareservices.com for help.`;
+In the meantime, please contact the office for help.`;
 
 export function resolveClientLoginMaintenanceMessage(raw: string | null | undefined): string {
     const trimmed = raw?.trim();
